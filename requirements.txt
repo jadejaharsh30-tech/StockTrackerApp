@@ -1,0 +1,11 @@
+flask
+flask-login
+yfinance
+pandas
+requests
+tqdm
+beautifulsoup4
+numpy
+streamlit
+openpyxl
+werkzeug

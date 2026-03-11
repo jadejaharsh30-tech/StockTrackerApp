@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Holding - {{ holding.symbol }}{% endblock %}
+
+{% block content %}
+    <div style="max-width: 500px; margin: 4em auto;">
+        <h2>Edit Holding for <span style="color:var(--primary-color);">{{ holding.symbol }}</span></h2>
+        <form method="post">
+            <div class="form-grid" style="grid-template-columns: 1fr;">
+                <div>
+                    <label for="exit_price">Exit Price (₹)</label>
+                    <input type="number" step="0.01" id="exit_price" name="exit_price" required value="{{ holding.exit_price }}">
+                </div>
+                <div>
+                    <label for="allocation">Allocation %</label>
+                    <input type="number" step="0.01" id="allocation" name="allocation" required value="{{ holding.allocation }}">
+                </div>
+                <div>
+                    <label for="rg_status">R/G</label>
+                    <select id="rg_status" name="rg_status">
+                        <option value="R" {% if holding.rg_status == 'R' %}selected{% endif %}>R</option>
+                        <option value="G" {% if holding.rg_status == 'G' %}selected{% endif %}>G</option>
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="submit-btn">Save Changes</button>
+            <a href="{{ url_for('portfolio') }}" style="display:block; text-align:center; margin-top:1em; color: var(--secondary-color);">Cancel</a>
+        </form>
+    </div>
+{% endblock %}

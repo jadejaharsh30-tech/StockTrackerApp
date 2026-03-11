@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}History Search Results - ATH Tracker{% endblock %}
+
+{% block content %}
+    <h2>{{ title }}</h2>
+    <a href="{{ url_for('history') }}" style="display: inline-block; margin-bottom: 1.5em;">&larr; Back to History Summary</a>
+
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Log Date</th>
+                    <th>Symbol</th>
+                    <th>EOD Price (₹)</th>
+                    <th>Category</th>
+                    <th>Final Trigger</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in records %}
+                <tr>
+                    <td>{{ record.log_date }}</td>
+                    <td><b>{{ record.symbol }}</b><br><small>Rounding: {{ record.rounding_price }} | SL: {{ record.stop_loss or 'N/A' }}</small></td>
+                    <td>{{ record.eod_price }}</td>
+                    <td>{{ record.category }}</td>
+                    <td><span class="trigger-{{ record.final_trigger.lower() }}">{{ record.final_trigger }}</span></td>
+                    <td>{{ record.remarks }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 40px;">No historical records found matching your query.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

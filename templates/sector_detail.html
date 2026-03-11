@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}{{ sector_name }} - Sector Detail{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1400px; margin: 0 auto; padding: 20px;">
+    <div class="page-header mb-4">
+        <a href="{{ url_for('sectors', weight=weight_type) }}" class="text-decoration-none text-muted">
+            <i class="fas fa-arrow-left"></i> Back to Sectors
+        </a>
+        <h1 class="display-4 mt-2">{{ sector_name }}</h1>
+        {% if sector_score %}
+        <div class="d-flex align-items-center gap-3 mt-3">
+            <div class="score-badge"
+                style="font-size: 2em; font-weight: 800; color: {{ score_color(sector_score.overall_score) }}">
+                {{ "%.1f"|format(sector_score.overall_score) }}
+            </div>
+            <div>
+                <div class="text-muted">Overall Sector Score</div>
+                <div class="text-muted" style="font-size: 0.9em;">
+                    {{ sector_score.num_companies }} companies | {{ weight_type|replace('_', '-')|title }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="row">
+        <!-- LEFT COLUMN: Top Companies + Score Distribution -->
+        <div class="col-md-7">
+            <!-- TOP COMPANIES -->
+            <div class="card glass-card mb-4 p-4">
+                <h5 class="fw-bold mb-3"><i class="fas fa-trophy text-warning"></i> Top Contributing Companies</h5>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover">
+                        <thead class="bg-light">
+                            <tr>
+                                <th>Rank</th>
+                                <th>Symbol</th>
+                                <th class="text-end">Overall Score</th>
+                                <th class="text-end">Market Cap</th>
+                                <th class="text-end">Weight (%)</th>
+                                <th class="text-end">Contribution</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for company in top_companies %}
+                            <tr>
+                                <td class="fw-bold">{{ loop.index }}</td>
+                                <td class="fw-bold text-primary">{{ company.symbol }}</td>
+                                <td class="text-end" style="color: {{ score_color(company.overall_score) }}">
+                                    {{ "%.1f"|format(company.overall_score) }}
+                                </td>
+                                <td class="text-end text-muted">
+                                    {{ "%.2f"|format(company.market_cap / 1e9) }} B
+                                </td>
+                                <td class="text-end text-muted">
+                                    {{ "%.1f"|format(company.weight * 100) }}%
+                                </td>
+                                <td class="text-end fw-bold">
+                                    {{ "%.2f"|format(company.contribution) }}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- SCORE DISTRIBUTION -->
+            <div class="card glass-card p-4">
+                <h5 class="fw-bold mb-3"><i class="fas fa-chart-bar"></i> Score Distribution</h5>
+                <canvas id="scoreDistribution" width="400" height="200"></canvas>
+                <div class="text-muted mt-2" style="font-size: 0.85em;">
+                    Distribution of overall scores across all companies in this sector
+                </div>
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Risk Metrics + Pillar Breakdown -->
+        <div class="col-md-5">
+            <!-- RISK METRICS -->
+            <div class="card glass-card mb-4 p-4">
+                <h5 class="fw-bold mb-3"><i class="fas fa-shield-alt text-danger"></i> Risk Metrics</h5>
+                {% if risk_metrics %}
+                <div class="row">
+                    <div class="col-6 mb-3">
+                        <div class="metric-card p-3 bg-light rounded">
+                            <div class="text-muted" style="font-size: 0.85em;">Beta vs Nifty 500</div>
+                            <div class="fs-4 fw-bold">{{ "%.2f"|format(risk_metrics.beta) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <div class="metric-card p-3 bg-light rounded">
+                            <div class="text-muted" style="font-size: 0.85em;">Alpha (Annualized)</div>
+                            <div class="fs-4 fw-bold text-{{ 'success' if risk_metrics.alpha > 0 else 'danger' }}">
+                                {{ "%+.2f"|format(risk_metrics.alpha) }}%
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <div class="metric-card p-3 bg-light rounded">
+                            <div class="text-muted" style="font-size: 0.85em;">Volatility (Ann.)</div>
+                            <div class="fs-4 fw-bold">{{ "%.1f"|format(risk_metrics.volatility * 100) }}%</div>
+                        </div>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <div class="metric-card p-3 bg-light rounded">
+                            <div class="text-muted" style="font-size: 0.85em;">Max Drawdown</div>
+                            <div class="fs-4 fw-bold text-danger">{{ "%.1f"|format(risk_metrics.max_drawdown * 100) }}%
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <div class="metric-card p-3 bg-light rounded">
+                            <div class="text-muted" style="font-size: 0.85em;">Sharpe Ratio</div>
+                            <div class="fs-4 fw-bold">{{ "%.2f"|format(risk_metrics.sharpe_ratio) }}</div>
+                        </div>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <div class="metric-card p-3 bg-light rounded">
+                            <div class="text-muted" style="font-size: 0.85em;">R²</div>
+                            <div class="fs-4 fw-bold">{{ "%.3f"|format(risk_metrics.r_squared) }}</div>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <p class="text-muted">Risk metrics not yet computed for this sector.</p>
+                {% endif %}
+            </div>
+
+            <!-- PILLAR BREAKDOWN -->
+            {% if sector_score %}
+            <div class="card glass-card p-4">
+                <h5 class="fw-bold mb-3"><i class="fas fa-layer-group"></i> Pillar Breakdown</h5>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span>Growth</span>
+                        <span class="fw-bold">{{ "%.1f"|format(sector_score.growth_score) }}</span>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-success" style="width: {{ sector_score.growth_score }}%"></div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span>Quality</span>
+                        <span class="fw-bold">{{ "%.1f"|format(sector_score.quality_score) }}</span>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-info" style="width: {{ sector_score.quality_score }}%"></div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span>Value</span>
+                        <span class="fw-bold">{{ "%.1f"|format(sector_score.value_score) }}</span>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-warning" style="width: {{ sector_score.value_score }}%"></div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span>Technicals</span>
+                        <span class="fw-bold">{{ "%.1f"|format(sector_score.tech_score) }}</span>
+                    </div>
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-primary" style="width: {{ sector_score.tech_score }}%"></div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Render score distribution histogram
+    const scoreData = {{ score_distribution | tojson }};
+
+    const ctx = document.getElementById('scoreDistribution').getContext('2d');
+
+    // Create histogram bins
+    const bins = [0, 20, 40, 60, 80 100];
+    const binCounts = new Array(bins.length - 1).fill(0);
+
+    scoreData.forEach(score => {
+        for (let i = 0; i < bins.length - 1; i++) {
+            if (score >= bins[i] && score < bins[i + 1]) {
+                binCounts[i]++;
+                break;
+            }
+        }
+    });
+
+    new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: ['0-20', '20-40', '40-60', '60-80', '80-100'],
+            datasets: [{
+                label: '# of Companies',
+                data: binCounts,
+                backgroundColor: ['#EF4444', '#F59E0B', '#FFCA28', '#9CCC65', '#10B981'],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1
+                    }
+                }
+            },
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Edit Checklist for {{ item.symbol }}{% endblock %}
+{% block content %}
+<div style="max-width: 500px; margin: 4em auto;">
+    <h2>Edit Checklist for <span style="color:var(--primary-color);">{{ item.symbol }}</span></h2>
+    <form method="post">
+        <div class="form-grid" style="grid-template-columns: 1fr; gap: 20px;">
+            <div>
+                <label for="analysis_status">Fundamental Analysis Done?</label>
+                <select id="analysis_status" name="analysis_status">
+                    <option value="Y" {% if item.analysis_status == 'Y' %}selected{% endif %}>Yes</option>
+                    <option value="N" {% if item.analysis_status == 'N' %}selected{% endif %}>No</option>
+                </select>
+            </div>
+            <div>
+                <label for="fund_allocation">Fund Allocation</label>
+                <select id="fund_allocation" name="fund_allocation">
+                    <option value="" {% if not item.fund_allocation %}selected{% endif %}>None</option>
+                    <option value="WM" {% if item.fund_allocation == 'WM' %}selected{% endif %}>WM</option>
+                    <option value="GM" {% if item.fund_allocation == 'GM' %}selected{% endif %}>GM</option>
+                </select>
+            </div>
+            <div>
+                <label for="breakout_status">Breakout?</label>
+                <select id="breakout_status" name="breakout_status">
+                    <option value="Y" {% if item.breakout_status == 'Y' %}selected{% endif %}>Yes</option>
+                    <option value="N" {% if item.breakout_status == 'N' %}selected{% endif %}>No</option>
+                </select>
+            </div>
+        </div>
+        <button type="submit" class="submit-btn">Save Changes</button>
+        <a href="{{ url_for('portfolio') }}" style="display:block; text-align:center; margin-top:1em; color: var(--secondary-color);">Cancel</a>
+    </form>
+</div>
+{% endblock %}

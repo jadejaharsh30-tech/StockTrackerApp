@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Watchlist - ATH Tracker{% endblock %}
+
+{% block content %}
+    <h2>My Watchlist</h2>
+    <p style="margin-bottom: 0.8em;">A persistent list of stocks to keep an eye on. Stocks are added automatically by the daily archive if they are close to a "GO" signal.</p>
+
+    <div class="page-actions" style="border-top: 1px solid var(--light-grey); border-bottom: 1px solid var(--light-grey); padding: 1em 0; margin-bottom: 1em;">
+        <div style="flex-grow: 1;">
+            <b>Backup & Restore Watchlist</b>
+            <p><small>Before any major app update, download your watchlist. After the update, restore it by uploading the same file.</small></p>
+        </div>
+        <div style="display:flex; gap: 8px; align-items: center;">
+             <form action="{{ url_for('upload_watchlist') }}" method="post" enctype="multipart/form-data" style="all:initial; display:flex; gap:8px; align-items:center;">
+                 <input type="file" name="excel_file" required>
+                 <button type="submit" class="edit-btn" style="background-color: var(--primary-color);">Upload & Restore</button>
+            </form>
+            <a href="{{ url_for('download_watchlist') }}" class="edit-btn" style="background-color: var(--success-color);">Download Backup</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <h4>Manually Add to Watchlist</h4>
+        <form action="{{ url_for('add_to_watchlist') }}" method="post" class="search-form" style="margin-bottom: 0;">
+            <input type="text" id="watchlist-symbol" class="ticker-autocomplete" name="symbol" placeholder="Enter Ticker" required style="flex-grow:1;" autocomplete="off">
+            <input type="text" name="reason" placeholder="Reason (e.g., Manually Added)">
+            <button type="submit" class="submit-btn" style="margin-top: 0;">Add to Watchlist</button>
+        </form>
+    </div>
+
+    <form action="{{ url_for('delete_watchlist_entries') }}" method="post">
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all-checkbox"></th>
+                        <th>Symbol</th>
+                        <th>Reason Added</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stock in stocks %}
+                    <tr>
+                        <td><input type="checkbox" name="stock_ids" value="{{ stock.id }}"></td>
+                        <td><b>{{ stock.symbol }}</b></td>
+                        <td>{{ stock.reason }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="3" style="text-align: center; padding: 40px;">Your watchlist is empty.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if stocks %}
+        <div style="margin-top: 1em; text-align: right;">
+            <button type="submit" class="delete-btn" onclick="return confirm('Are you sure you want to delete the selected stocks from your watchlist?');">Delete Selected</button>
+        </div>
+        {% endif %}
+    </form>
+    
+    <script>
+        document.getElementById('select-all-checkbox').addEventListener('click', function(event) {
+            const checkboxes = document.querySelectorAll('input[name="stock_ids"]');
+            checkboxes.forEach(function(checkbox) { checkbox.checked = event.target.checked; });
+        });
+    </script>
+{% endblock %}

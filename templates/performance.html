@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Performance - ATH Tracker{% endblock %}
+
+{% block content %}
+<h2>Portfolio Performance</h2>
+
+{% for portfolio in portfolio_performance %}
+<div class="card" style="margin-bottom: 2em;">
+    <h3>{{ portfolio.name }}</h3>
+    <p>Total Value: ₹{{ portfolio.total_value }}<br>
+    Average Daily Change: {{ portfolio.total_change }}%<br>
+    Holdings: {{ portfolio.holdings_count }}</p>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Allocation %</th>
+                    <th>Daily Change %</th>
+                    <th>Current Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for holding in portfolio.holdings %}
+                <tr>
+                    <td>{{ holding.symbol }}</td>
+                    <td>{{ holding.allocation }}</td>
+                    <td>{{ holding.change_pct }}</td>
+                    <td>{{ holding.current_value }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" style="text-align:center;">No holdings in this portfolio.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+{% endblock %} 

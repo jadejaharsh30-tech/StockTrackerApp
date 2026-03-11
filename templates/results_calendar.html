@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Results Calendar{% endblock %}
+{% block content %}
+    <h2>Results Calendar</h2>
+    <p>A log of upcoming result dates for stocks in your Profit Tracker.</p>
+
+    <div class="card">
+        <form action="{{ url_for('results_calendar') }}" method="get" class="search-form">
+            <input type="text" id="results-search-symbol" class="ticker-autocomplete" name="search_symbol" placeholder="Search Symbol..." value="{{ search_symbol or '' }}" autocomplete="off">
+            <label for="start_date">From:</label>
+            <input type="date" id="start_date" name="start_date" value="{{ start_date or '' }}">
+            <label for="end_date">To:</label>
+            <input type="date" id="end_date" name="end_date" value="{{ end_date or '' }}">
+            <button type="submit" class="submit-btn" style="padding: 8px 12px; margin-top: 0;">Filter</button>
+            <a href="{{ url_for('results_calendar') }}" style="text-decoration: underline; font-size: 14px; margin-left: 8px;">Reset</a>
+        </form>
+        <div class="backup-controls">
+            <form action="{{ url_for('refresh_result_dates') }}" method="post" style="all:initial;">
+                <button type="submit" class="edit-btn" style="background-color: var(--primary-color);">Refresh Dates</button>
+            </form>
+            <a href="{{ url_for('download_results_view', search_symbol=search_symbol, start_date=start_date, end_date=end_date) }}" class="edit-btn" style="background-color: var(--success-color);">Download View</a>
+        </div>
+    </div>
+    
+    <style>
+        .quick-date-link.active-tab {
+            background: #d0eaff !important;
+            color: #2176bd !important;
+            font-weight: bold;
+        }
+        .tab-nav .edit-btn.active-tab {
+            background: #d0eaff !important;
+            color: #2176bd !important;
+            font-weight: bold;
+        }
+        .fno-toggle {
+            margin-left: 10px;
+            background: #f0f0f0;
+            color: #2176bd;
+            text-decoration: none;
+        }
+        .fno-toggle.active-tab {
+            background: var(--primary-color) !important;
+            color: white !important;
+        }
+    </style>
+
+    <div class="tab-nav" style="margin-bottom: 1em; justify-content: flex-start; align-items: center;">
+        <a href="{{ url_for('results_calendar') }}" class="edit-btn{% if not result_date and not fno_only %} active-tab{% endif %}" style="background:#e3f0fa; color:#2176bd; text-decoration:none;">Upcoming Results</a>
+        <a href="{{ url_for('results_calendar', fno_only=1, search_symbol=search_symbol, start_date=start_date, end_date=end_date) }}" class="edit-btn fno-toggle{% if fno_only %} active-tab{% endif %}">FNO Only</a>
+        <span style="margin-left: 16px; margin-right: 12px; font-weight: 500;">Quick Filter:</span>
+        {% for day, day_str in quick_date_pairs %}
+            <a href="{{ url_for('results_calendar', result_date=day_str, fno_only=fno_only|int, search_symbol=search_symbol, start_date=start_date, end_date=end_date) }}"
+               class="edit-btn quick-date-link{% if result_date == day_str %} active-tab{% endif %}"
+               style="margin-right: 4px;">
+                {{ day.strftime('%d %b') }}
+            </a>
+        {% endfor %}
+        <a href="{{ url_for('results_calendar') }}" style="text-decoration: underline; font-size: 14px; margin-left: 8px;">Reset</a>
+    </div>
+
+    {% if conflicts %}
+    <div style="margin-bottom: 2em;">
+        <h4 style="color: var(--danger-color);">Action Required: Mismatched Dates</h4>
+        <div class="table-wrapper">
+            <table>
+                <thead><tr><th>Symbol</th><th>Status</th></tr></thead>
+                <tbody>
+                    {% for item in conflicts %}
+                    <tr><td><b>{{ item.symbol }}</b></td><td>{{ item.result_date }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <h4>{{ "Results for Selected Criteria" if (start_date or end_date or search_symbol) else "All Upcoming Results" }}</h4>
+    <div class="table-wrapper">
+        <table>
+            <thead><tr><th>Symbol</th><th>Announced Result Date</th></tr></thead>
+            <tbody>
+                {% for item in results %}
+                <tr>
+                    <td><b>{{ item.symbol }}</b></td>
+                    <td>{{ item.display_date }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="2" style="text-align: center; padding: 40px;">No results found for the selected criteria.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

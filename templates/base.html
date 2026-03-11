@@ -1,0 +1,1921 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ATH Tracker{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            /* Premium Modern Palette (HSL) */
+            --primary-color: hsl(220, 60%, 25%);
+            /* Deep Royal Blue */
+            --secondary-color: hsl(215, 25%, 27%);
+            /* Elegant Charcoal */
+            --accent-color: hsl(40, 90%, 55%);
+            /* Vibrant Amber */
+            --success-color: hsl(150, 60%, 40%);
+            /* Rich Emerald */
+            --danger-color: hsl(350, 70%, 50%);
+            /* Soft Crimson */
+            --warning-color: hsl(40, 95%, 50%);
+            --info-color: hsl(210, 80%, 50%);
+            /* Clear Azure */
+
+            --light-grey: hsl(210, 20%, 93%);
+            --white-color: #ffffff;
+
+            /* Glassmorphism Variables */
+            --glass-bg: rgba(255, 255, 255, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+            --glass-blur: blur(12px);
+
+            --bg-color: hsl(210, 30%, 96%);
+            /* Very subtle cool grey */
+            --font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            --border-radius: 16px;
+            /* modern rounded corners */
+        }
+
+        body {
+            /* Subtle Mesh Gradient Background to show off glass effect */
+            background: linear-gradient(135deg, #f6f8fd 0%, #eef2f9 100%);
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+
+        [data-theme="dark"] {
+            --primary-color: hsl(220, 90%, 90%);
+            /* Icy Blue */
+            --secondary-color: hsl(215, 20%, 85%);
+            /* Soft Grey */
+            --accent-color: hsl(45, 90%, 60%);
+            --success-color: hsl(150, 50%, 45%);
+            --danger-color: hsl(350, 70%, 65%);
+            --warning-color: hsl(40, 90%, 60%);
+            --info-color: hsl(210, 80%, 65%);
+
+            --light-grey: hsl(215, 20%, 25%);
+            --white-color: hsl(220, 20%, 12%);
+            /* Dark card bg */
+
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            /* Dark glass */
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+
+            --bg-color: hsl(222, 47%, 11%);
+            /* Deep space blue */
+        }
+
+        [data-theme="dark"] body {
+            background: radial-gradient(circle at top left, hsl(222, 40%, 15%), hsl(222, 50%, 8%));
+        }
+
+        /* Glassmorphism Utility Classes */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            border-radius: var(--border-radius);
+        }
+
+        /* Overwriting default card style */
+        .card,
+        nav,
+        .page-actions,
+        .table-wrapper,
+        form,
+        .history-controls {
+            background: var(--glass-bg) !important;
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--glass-border) !important;
+            box-shadow: var(--glass-shadow) !important;
+            border-radius: var(--border-radius) !important;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-color);
+            color: var(--secondary-color);
+            line-height: 1.7;
+            font-size: 16px;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 1em auto;
+            padding: 0 1em;
+        }
+
+        h1,
+        h2,
+        h3,
+        h4,
+        h5,
+        h6 {
+            font-family: var(--font-family);
+            font-weight: 700;
+            color: var(--primary-color);
+            letter-spacing: -0.5px;
+        }
+
+        h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--light-grey);
+            margin-bottom: 0.8em;
+        }
+
+        h3 {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        h4 {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        h5 {
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        nav {
+            background: var(--white-color);
+            padding: 0.8em 1.5em;
+            margin-bottom: 1.5em;
+            box-shadow: var(--shadow);
+            border-radius: var(--border-radius);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            z-index: 9999;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: center;
+            gap: 0.8em;
+        }
+
+        nav a {
+            text-decoration: none;
+            color: var(--secondary-color);
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 6px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        nav a:hover,
+        nav a.active {
+            background-color: var(--primary-color);
+            color: var(--white-color);
+        }
+
+        /* --- Dropdown Menu Styles --- */
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: var(--white-color);
+            min-width: 200px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            border-radius: var(--border-radius);
+            border: 1px solid var(--glass-border);
+            padding: 0.5em 0;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, 10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+        }
+
+        .dropdown-content a {
+            color: var(--secondary-color);
+            padding: 10px 16px;
+            text-decoration: none;
+            display: block;
+            font-size: 0.95em;
+            transition: background 0.2s;
+            border-radius: 0;
+            margin: 0;
+        }
+
+        .dropdown-content a:hover {
+            background-color: rgba(var(--primary-rgb), 0.05);
+            /* Light hover */
+            color: var(--primary-color);
+        }
+
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+
+        .dropbtn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            font-family: var(--font-family);
+            color: var(--secondary-color);
+            font-weight: 500;
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .dropbtn:hover,
+        .dropdown:hover .dropbtn {
+            color: var(--primary-color);
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+        }
+
+        /* --- Dropdown Menu Styles --- */
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: var(--white-color);
+            min-width: 200px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            border-radius: var(--border-radius);
+            border: 1px solid var(--glass-border);
+            padding: 0.5em 0;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            animation: fadeIn 0.2s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translate(-50%, 10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translate(-50%, 0);
+            }
+        }
+
+        .dropdown-content a {
+            color: var(--secondary-color);
+            padding: 10px 16px;
+            text-decoration: none;
+            display: block;
+            font-size: 0.95em;
+            transition: background 0.2s;
+            border-radius: 0;
+            margin: 0;
+        }
+
+        .dropdown-content a:hover {
+            background-color: #f6f8fd;
+            /* Light hover */
+            color: var(--primary-color);
+        }
+
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+
+        .dropbtn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            font-family: var(--font-family);
+            color: var(--secondary-color);
+            font-weight: 500;
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .dropbtn:hover,
+        .dropdown:hover .dropbtn {
+            color: var(--primary-color);
+            background: rgba(0, 0, 0, 0.03);
+            border-radius: 6px;
+        }
+
+        .nav-menu {
+            display: flex;
+            align-items: center;
+            gap: 0.2em;
+            /* Tighter gap */
+        }
+
+        .nav-right {
+            display: flex;
+            align-items: center;
+            gap: 0.8em;
+        }
+
+        .flash-messages {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 1em;
+        }
+
+        .flash-messages li {
+            padding: 12px;
+            border-radius: var(--border-radius);
+            color: var(--white-color);
+            margin-bottom: 0.8em;
+        }
+
+        .flash-success {
+            background-color: var(--success-color);
+        }
+
+        .flash-danger {
+            background-color: var(--danger-color);
+        }
+
+        .flash-info {
+            background-color: var(--info-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: var(--white-color);
+            box-shadow: var(--shadow);
+            border-radius: var(--border-radius);
+            overflow: hidden;
+        }
+
+        th,
+        td {
+            padding: 12px 16px;
+            text-align: left;
+            vertical-align: middle;
+            border-bottom: 1px solid var(--light-grey);
+        }
+
+        tr td:nth-child(2) {
+            vertical-align: top;
+        }
+
+        th {
+            background-color: var(--secondary-color);
+            color: var(--white-color);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 12px;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: #f0f4fa;
+        }
+
+        .trigger-go {
+            background-color: var(--success-color);
+            color: white;
+            font-weight: bold;
+            text-align: center;
+            padding: 4px 8px;
+            border-radius: 20px;
+        }
+
+        .edit-btn {
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+            background-color: var(--accent-color);
+            color: var(--white-color);
+            text-decoration: none;
+            border-radius: var(--border-radius);
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .edit-btn:hover {
+            background-color: var(--primary-color);
+            color: var(--white-color);
+        }
+
+        form {
+            background-color: var(--white-color);
+            padding: 1.2em;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-top: 1em;
+            border: 1px solid var(--light-grey);
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.8em;
+        }
+
+        label {
+            margin-bottom: 6px;
+            font-weight: 500;
+            font-size: 14px;
+            color: var(--primary-color);
+        }
+
+        input,
+        select {
+            width: 100%;
+            padding: 10px;
+            border-radius: var(--border-radius);
+            border: 1px solid #cbd5e1;
+            font-family: var(--font-family);
+            font-size: 1em;
+        }
+
+        input:focus,
+        select:focus {
+            outline: 2px solid var(--accent-color);
+            border-color: var(--accent-color);
+            background: #fffbe6;
+        }
+
+        button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: var(--border-radius);
+            font-family: var(--font-family);
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .submit-btn {
+            grid-column: 1 / -1;
+            background-color: var(--primary-color);
+            color: var(--white-color);
+            margin-top: 0.8em;
+        }
+
+        .submit-btn:hover {
+            background-color: var(--accent-color);
+            color: var(--white-color);
+        }
+
+        .delete-btn {
+            background-color: var(--danger-color);
+            color: var(--white-color);
+            padding: 6px 10px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .delete-btn:hover {
+            background-color: #a4161a;
+        }
+
+        .search-form {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 0.8em;
+            align-items: center;
+        }
+
+        .page-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1em;
+            background: var(--white-color);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 0.8em 1.2em;
+            border: 1px solid var(--light-grey);
+        }
+
+        input[readonly] {
+            background-color: #f0f0f0;
+            /* A light grey background */
+            cursor: not-allowed;
+            /* Show a 'not-allowed' cursor on hover */
+            color: #555;
+            /* Slightly dimmer text color */
+        }
+
+        /* --- Autocomplete Styles --- */
+        .autocomplete {
+            position: relative;
+            display: inline-block;
+        }
+
+        .autocomplete-items {
+            position: absolute;
+            border: 1px solid #d4d4d4;
+            border-bottom: none;
+            border-top: none;
+            z-index: 99;
+            top: 100%;
+            left: 0;
+            right: 0;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .autocomplete-items div {
+            padding: 10px;
+            cursor: pointer;
+            background-color: #fff;
+            border-bottom: 1px solid #d4d4d4;
+        }
+
+        .autocomplete-items div:hover {
+            background-color: #e9e9e9;
+        }
+
+        .autocomplete-active {
+            background-color: DodgerBlue !important;
+            color: #ffffff;
+        }
+
+        .history-badge {
+            display: inline-block;
+            margin-left: 1em;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            background-color: var(--light-grey);
+            color: var(--secondary-color);
+            border-radius: 20px;
+        }
+
+        /* --- Styles for New History Control Panel --- */
+        .history-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            /* Allows controls to stack on smaller screens */
+            gap: 15px;
+            background-color: var(--white-color);
+            padding: 1em;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin-bottom: 1em;
+        }
+
+        .history-controls .search-form {
+            padding: 0;
+            margin: 0;
+            box-shadow: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-grow: 1;
+        }
+
+        .history-controls .backup-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        /* --- Styles for Tabbed Navigation --- */
+        .tab-nav {
+            display: flex;
+            border-bottom: 2px solid #dee2e6;
+            margin-bottom: 1em;
+        }
+
+        .tab-nav a {
+            padding: 8px 16px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            color: #6c757d;
+            text-decoration: none;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .tab-nav a.active,
+        .tab-nav a:hover {
+            color: var(--primary-color);
+            border-bottom: 3px solid var(--primary-color);
+        }
+
+        .tab-content {
+            display: none;
+            /* All content hidden by default */
+        }
+
+        .tab-content.active {
+            display: block;
+            /* Show only the active content */
+        }
+
+        .active-sort .sort-icon {
+            color: var(--primary-color);
+            font-weight: bold;
+        }
+
+        .upload-btn {
+            background-color: var(--primary-color) !important;
+            color: white !important;
+            border-color: var(--primary-color) !important;
+        }
+
+        .upload-btn:hover {
+            background-color: var(--primary-color) !important;
+            color: white !important;
+            border-color: var(--primary-color) !important;
+        }
+
+        /* Loading Spinner Styles */
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 2em;
+            border-radius: var(--border-radius);
+            text-align: center;
+        }
+
+        .btn-loading {
+            position: relative;
+            pointer-events: none;
+        }
+
+        .btn-loading::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid transparent;
+            border-top: 2px solid currentColor;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        /* Tooltip Styles */
+        .tooltip {
+            position: relative;
+            cursor: help;
+        }
+
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--secondary-color);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+            z-index: 1000;
+        }
+
+        .tooltip::before {
+            content: '';
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: var(--secondary-color);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s, visibility 0.3s;
+            z-index: 1000;
+        }
+
+        .tooltip:hover::after,
+        .tooltip:hover::before {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Notification Styles */
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: var(--border-radius);
+            color: white;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        .notification-success {
+            background-color: var(--success-color);
+        }
+
+        .notification-error {
+            background-color: var(--danger-color);
+        }
+
+        .notification-info {
+            background-color: var(--info-color);
+        }
+
+        /* Mobile Menu */
+        @media (max-width: 768px) {
+            .nav-menu {
+                position: fixed;
+                top: 0;
+                right: -100%;
+                /* Hidden off-screen */
+                width: 250px;
+                height: 100vh;
+                background: var(--glass-bg);
+                backdrop-filter: blur(15px);
+                flex-direction: column;
+                padding: 4em 2em;
+                transition: right 0.3s ease;
+                z-index: 1000;
+                box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1);
+            }
+
+            .nav-menu.active {
+                right: 0;
+            }
+
+            .mobile-menu-btn {
+                display: block;
+                z-index: 1001;
+            }
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: var(--primary-color);
+        }
+
+        /* Staggered Animation Logic */
+        .stagger-fade-in {
+            opacity: 0;
+            animation: fadeInUp 0.5s ease forwards;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* create delays for up to 20 items */
+        .delay-1 {
+            animation-delay: 0.1s;
+        }
+
+        .delay-2 {
+            animation-delay: 0.15s;
+        }
+
+        .delay-3 {
+            animation-delay: 0.2s;
+        }
+
+        .delay-4 {
+            animation-delay: 0.25s;
+        }
+
+        .delay-5 {
+            animation-delay: 0.3s;
+        }
+
+        .delay-6 {
+            animation-delay: 0.35s;
+        }
+
+        .delay-7 {
+            animation-delay: 0.4s;
+        }
+
+        .delay-8 {
+            animation-delay: 0.45s;
+        }
+
+        .delay-9 {
+            animation-delay: 0.5s;
+        }
+
+        .delay-10 {
+            animation-delay: 0.55s;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        /* Undo Button */
+        #undo-btn {
+            display: none;
+            background-color: var(--warning-color);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+
+        /* Validation Styles */
+        .validation-message {
+            font-size: 12px;
+            margin-top: 5px;
+            min-height: 16px;
+        }
+
+        .validation-message.error {
+            color: var(--danger-color);
+        }
+
+        .validation-message.success {
+            color: var(--success-color);
+        }
+
+        input.error,
+        select.error {
+            border-color: var(--danger-color);
+            box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.2);
+        }
+
+        input.success,
+        select.success {
+            border-color: var(--success-color);
+            box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.2);
+        }
+
+        /* Keyboard Shortcut Styling */
+        kbd {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 3px;
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+            color: #333;
+            display: inline-block;
+            font-size: 0.85em;
+            font-weight: 700;
+            line-height: 1;
+            padding: 2px 4px;
+            white-space: nowrap;
+        }
+
+        /* Help Section Styling */
+        #help-content ul li {
+            margin-bottom: 8px;
+            padding: 5px 0;
+        }
+
+        #help-content h5 {
+            color: var(--primary-color);
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--light-grey);
+            padding-bottom: 5px;
+        }
+
+        .card {
+            background: var(--white-color);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 1.5em;
+            margin-bottom: 1.5em;
+            border: 1px solid var(--light-grey);
+        }
+
+        .table-wrapper {
+            background: var(--white-color);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 0.5em 0.5em 0 0.5em;
+            margin-bottom: 1em;
+            border: 1px solid var(--light-grey);
+        }
+
+        /* Floating Labels */
+        .form-group {
+            position: relative;
+            margin-bottom: 1.2em;
+        }
+
+        .form-group input:focus+label,
+        .form-group input:not(:placeholder-shown)+label,
+        .form-group select:focus+label,
+        .form-group select:not([value=""])+label {
+            top: -0.8em;
+            left: 0.8em;
+            font-size: 0.85em;
+            color: var(--accent-color);
+            background: var(--white-color);
+            padding: 0 0.3em;
+            z-index: 2;
+        }
+
+        .form-group label {
+            position: absolute;
+            top: 50%;
+            left: 1em;
+            transform: translateY(-50%);
+            background: transparent;
+            color: #888;
+            font-size: 1em;
+            pointer-events: none;
+            transition: all 0.2s;
+            z-index: 1;
+        }
+
+        .form-group input,
+        .form-group select {
+            padding: 1.2em 1em 0.6em 1em;
+            background: var(--white-color);
+        }
+
+        /* Enhanced Buttons */
+        .edit-btn,
+        .submit-btn,
+        .delete-btn {
+            transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+            box-shadow: 0 2px 8px rgba(26, 54, 93, 0.04);
+        }
+
+        .edit-btn:active,
+        .submit-btn:active,
+        .delete-btn:active {
+            box-shadow: 0 1px 2px rgba(26, 54, 93, 0.10);
+            transform: translateY(1px);
+        }
+
+        /* Table Zebra Striping */
+        tbody tr:nth-child(even) {
+            background: #f4f7fa;
+        }
+
+        tbody tr:hover {
+            background: #e9f0fa;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            padding: 0.2em 0.7em;
+            font-size: 0.85em;
+            font-weight: 600;
+            border-radius: 999px;
+            background: var(--light-grey);
+            color: var(--secondary-color);
+            margin-left: 0.5em;
+        }
+
+        .badge-success {
+            background: var(--success-color);
+            color: #fff;
+        }
+
+        .badge-danger {
+            background: var(--danger-color);
+            color: #fff;
+        }
+
+        .badge-warning {
+            background: var(--warning-color);
+            color: #fff;
+        }
+
+        .badge-info {
+            background: var(--info-color);
+            color: #fff;
+        }
+
+        /* Skeleton Loader */
+        .skeleton {
+            background: linear-gradient(90deg, #f7fafc 25%, #e2e8f0 50%, #f7fafc 75%);
+            background-size: 200% 100%;
+            animation: skeleton-loading 1.2s infinite linear;
+            border-radius: 6px;
+            min-height: 1.2em;
+        }
+
+        @keyframes skeleton-loading {
+            0% {
+                background-position: 200% 0;
+            }
+
+            100% {
+                background-position: -200% 0;
+            }
+        }
+
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            bottom: 2em;
+            right: 2em;
+            min-width: 220px;
+            background: var(--secondary-color);
+            color: #fff;
+            padding: 1em 1.5em;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            z-index: 9999;
+            opacity: 0.98;
+            display: flex;
+            align-items: center;
+            gap: 0.8em;
+            font-size: 1em;
+            animation: toast-in 0.3s;
+        }
+
+        @keyframes toast-in {
+            from {
+                transform: translateY(40px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 0.98;
+            }
+        }
+
+        .toast-success {
+            background: var(--success-color);
+        }
+
+        .toast-danger {
+            background: var(--danger-color);
+        }
+
+        .toast-info {
+            background: var(--info-color);
+        }
+
+        /* Smooth Transitions */
+        * {
+            transition: background 0.2s, color 0.2s, border 0.2s, box-shadow 0.2s;
+        }
+
+        .dark-toggle {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            font-size: 1.5em;
+            cursor: pointer;
+            margin-left: 1em;
+            transition: color 0.2s;
+        }
+
+        .dark-toggle:hover {
+            color: var(--accent-color);
+        }
+
+        .nav-tabs {
+            display: flex;
+            gap: 0.5em;
+            margin-bottom: 1.5em;
+            border-bottom: 2px solid var(--light-grey);
+            overflow-x: auto;
+            padding-bottom: 0.5em;
+        }
+
+        .nav-tabs a {
+            padding: 0.8em 1.2em;
+            text-decoration: none;
+            color: var(--secondary-color);
+            border-radius: var(--border-radius) var(--border-radius) 0 0;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+            border-bottom: none;
+        }
+
+        .nav-tabs a:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+            color: var(--primary-color);
+        }
+
+        .nav-tabs a.active {
+            background-color: var(--white-color);
+            color: var(--primary-color);
+            border-color: var(--light-grey);
+            border-bottom-color: var(--white-color);
+            margin-bottom: -2px;
+        }
+
+        @media (max-width: 768px) {
+            .nav-tabs {
+                gap: 0.3em;
+                padding-bottom: 0.3em;
+            }
+
+            .nav-tabs a {
+                padding: 0.6em 1em;
+                font-size: 0.9em;
+            }
+        }
+
+        .nav-menu {
+            display: flex;
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            gap: 0.5em;
+            align-items: center;
+        }
+
+        .nav-menu li a {
+            padding: 0.8em 1.2em;
+            text-decoration: none;
+            color: var(--text-color);
+            border-radius: var(--border-radius);
+            transition: all 0.3s ease;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .nav-menu li a:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+            color: var(--primary-color);
+        }
+
+        .nav-menu li a.active {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            .nav-menu {
+                position: fixed;
+                top: 0;
+                right: -100%;
+                /* Hidden off-screen */
+                width: 250px;
+                height: 100vh;
+                background: var(--glass-bg);
+                backdrop-filter: blur(15px);
+                flex-direction: column;
+                padding: 4em 2em;
+                transition: right 0.3s ease;
+                z-index: 1000;
+                box-shadow: -5px 0 15px rgba(0, 0, 0, 0.1);
+            }
+
+            .nav-menu.active {
+                right: 0;
+            }
+
+            .mobile-menu-btn {
+                display: block;
+                z-index: 1001;
+            }
+        }
+
+        .mobile-menu-btn {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: var(--primary-color);
+        }
+
+        /* Staggered Animation Logic */
+        .stagger-fade-in {
+            opacity: 0;
+            animation: fadeInUp 0.5s ease forwards;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* create delays for up to 20 items */
+        .delay-1 {
+            animation-delay: 0.1s;
+        }
+
+        .delay-2 {
+            animation-delay: 0.15s;
+        }
+
+        .delay-3 {
+            animation-delay: 0.2s;
+        }
+
+        .delay-4 {
+            animation-delay: 0.25s;
+        }
+
+        .delay-5 {
+            animation-delay: 0.3s;
+        }
+
+        .delay-6 {
+            animation-delay: 0.35s;
+        }
+
+        .delay-7 {
+            animation-delay: 0.4s;
+        }
+
+        .delay-8 {
+            animation-delay: 0.45s;
+        }
+
+        .delay-9 {
+            animation-delay: 0.5s;
+        }
+
+        .delay-10 {
+            animation-delay: 0.55s;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        {% if not embed_mode %}
+        <header>
+            <nav>
+                <a href="{{ url_for('dashboard') }}"
+                    style="font-size: 1.2em; font-weight: 700; text-decoration:none; color: var(--secondary-color);">
+                    {% if current_user.is_authenticated %}{{ current_user.username }}'s {% endif %}ATH Tracker
+                </a>
+                <ul class="nav-menu">
+                    {% if current_user.is_authenticated %}
+
+                    <!-- 1. DASHBOARD -->
+                    <li><a href="{{ url_for('dashboard') }}"
+                            class="{{ 'active' if active_page == 'dashboard' else '' }}">Dashboard</a></li>
+
+                    <!-- 2. RESEARCH DROPDOWN -->
+                    <li class="dropdown">
+                        <button class="dropbtn">Research ▾</button>
+                        <div class="dropdown-content">
+                            <a href="{{ url_for('turtle_dashboard') }}">🐢 Turtle Dashboard</a>
+                            <a href="{{ url_for('sectors') }}">📊 Sector Analytics</a>
+                            <a href="{{ url_for('fundamental_analysis') }}">🧬 Fundamental Analysis</a>
+                            <a href="{{ url_for('analytics') }}">📊 Deep Analytics (Sector)</a>
+                            <a href="{{ url_for('news') }}">📰 News Feed</a>
+                            <a href="{{ url_for('results_calendar') }}">📅 Results Calendar</a>
+                        </div>
+                    </li>
+
+                    <!-- 3. WEALTH DROPDOWN -->
+                    <li class="dropdown">
+                        <button class="dropbtn">My Wealth ▾</button>
+                        <div class="dropdown-content">
+                            <a href="{{ url_for('portfolio') }}">💼 Portfolio</a>
+                            <a href="{{ url_for('watchlist') }}">👀 Watchlist</a>
+                            <a href="{{ url_for('profit_manager') }}">💰 Profit Manager</a>
+                            <a href="{{ url_for('history') }}">📜 Trade History</a>
+                            <a href="{{ url_for('performance') }}">📈 Performance</a>
+                        </div>
+                    </li>
+
+                    <!-- 4. TOOLS DROPDOWN -->
+                    <li class="dropdown">
+                        <button class="dropbtn">Tools ▾</button>
+                        <div class="dropdown-content">
+                            <a href="{{ url_for('go_list') }}">🚀 GO List (Breakouts)</a>
+                            <a href="{{ url_for('ath_scanner') }}">⚡ ATH Scanner</a>
+                            <a href="{{ url_for('alerts') }}">🔔 Price Alerts</a>
+                        </div>
+                    </li>
+
+                    <!-- LOGOUT -->
+                    <li><a href="{{ url_for('logout') }}" style="color: var(--danger-color);">Logout</a></li>
+
+                    {% else %}
+                    <li><a href="{{ url_for('login') }}"
+                            class="{{ 'active' if active_page == 'login' else '' }}">Login</a></li>
+                    <li><a href="{{ url_for('signup') }}" class="{{ 'active' if active_page == 'signup' else '' }}">Sign
+                            Up</a></li>
+                    {% endif %}
+                </ul>
+                <button class="dark-toggle" id="dark-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">
+                    <span id="dark-toggle-icon">🌙</span>
+                </button>
+                <button class="mobile-menu-btn" onclick="toggleMobileMenu()">☰</button>
+            </nav>
+        </header>
+        {% endif %}
+
+        <main>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <ul class="flash-messages">
+                {% for category, message in messages %}
+                <li class="flash-{{ category }}">{{ message }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- LOADING UTILITY FUNCTIONS ---
+            function showLoading(message = 'Loading...') {
+                const overlay = document.getElementById('loading-overlay');
+                const messageEl = overlay.querySelector('p');
+                messageEl.textContent = message;
+                overlay.style.display = 'flex';
+            }
+
+            function hideLoading() {
+                const overlay = document.getElementById('loading-overlay');
+                overlay.style.display = 'none';
+            }
+
+            // --- MOBILE MENU ---
+            window.toggleMobileMenu = function () {
+                const menu = document.querySelector('.nav-menu');
+                menu.classList.toggle('active');
+            }
+
+            // --- UNDO FUNCTIONALITY ---
+            function addToUndoStack(action, data) {
+                const undoStack = JSON.parse(sessionStorage.getItem('undoStack') || '[]');
+                undoStack.push({
+                    action: action,
+                    data: data,
+                    timestamp: Date.now()
+                });
+                // Keep only last 10 actions
+                if (undoStack.length > 10) {
+                    undoStack.shift();
+                }
+                sessionStorage.setItem('undoStack', JSON.stringify(undoStack));
+                updateUndoButton();
+            }
+
+            function updateUndoButton() {
+                const undoStack = JSON.parse(sessionStorage.getItem('undoStack') || '[]');
+                const undoBtn = document.getElementById('undo-btn');
+                if (undoBtn) {
+                    undoBtn.style.display = undoStack.length > 0 ? 'inline-block' : 'none';
+                }
+            }
+
+            function undoLastAction() {
+                const undoStack = JSON.parse(sessionStorage.getItem('undoStack') || '[]');
+                if (undoStack.length === 0) return;
+
+                const lastAction = undoStack.pop();
+                sessionStorage.setItem('undoStack', JSON.stringify(undoStack));
+
+                // Handle different undo actions
+                if (lastAction.action === 'delete_stock') {
+                    // Could implement AJAX call to restore stock
+                    showNotification('Stock restored', 'success');
+                }
+
+                updateUndoButton();
+            }
+
+            // --- NOTIFICATION SYSTEM ---
+            function showNotification(message, type = 'info') {
+                const notification = document.createElement('div');
+                notification.className = `notification notification-${type}`;
+                notification.innerHTML = `
+                <span>${message}</span>
+                <button onclick="this.parentElement.remove()" style="background:none; border:none; color:white; cursor:pointer;">×</button>
+            `;
+                document.body.appendChild(notification);
+
+                setTimeout(() => {
+                    notification.remove();
+                }, 5000);
+            }
+
+            // --- FORM VALIDATION ---
+            function validateField(field) {
+                const validation = field.getAttribute('data-validation');
+                const value = field.value.trim();
+                const errorElement = document.getElementById(field.id + '-error');
+
+                if (!validation) return true;
+
+                const rules = validation.split(',');
+                let isValid = true;
+                let errorMessage = '';
+
+                for (const rule of rules) {
+                    switch (rule.trim()) {
+                        case 'required':
+                            if (!value) {
+                                isValid = false;
+                                errorMessage = 'This field is required';
+                            }
+                            break;
+                        case 'positive':
+                            if (value && parseFloat(value) <= 0) {
+                                isValid = false;
+                                errorMessage = 'Value must be positive';
+                            }
+                            break;
+                    }
+                }
+
+                // Update UI
+                if (isValid) {
+                    field.classList.remove('error');
+                    field.classList.add('success');
+                    errorElement.textContent = '';
+                    errorElement.className = 'validation-message success';
+                } else {
+                    field.classList.remove('success');
+                    field.classList.add('error');
+                    errorElement.textContent = errorMessage;
+                    errorElement.className = 'validation-message error';
+                }
+
+                return isValid;
+            }
+
+            function validateForm(form) {
+                const fields = form.querySelectorAll('[data-validation]');
+                let isValid = true;
+
+                fields.forEach(field => {
+                    if (!validateField(field)) {
+                        isValid = false;
+                    }
+                });
+
+                return isValid;
+            }
+
+            // Add validation listeners
+            const forms = document.querySelectorAll('form');
+            forms.forEach(form => {
+                const fields = form.querySelectorAll('[data-validation]');
+                fields.forEach(field => {
+                    field.addEventListener('blur', () => validateField(field));
+                    field.addEventListener('input', () => validateField(field));
+                });
+
+                form.addEventListener('submit', function (e) {
+                    if (!validateForm(this)) {
+                        e.preventDefault();
+                        showNotification('Please fix the validation errors', 'error');
+                    }
+                });
+            });
+
+            // --- UNIVERSAL KEYBOARD SHORTCUT ---
+            document.addEventListener('keydown', function (event) {
+                if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+                if (event.key === '/') {
+                    event.preventDefault();
+                    // Try to focus the most relevant visible input for the current page
+                    var ids = [
+                        'watchlist-symbol',
+                        // Portfolio holding inputs (may be multiple)
+                        ...Array.from(document.querySelectorAll('[id^="portfolio-holding-symbol-"]')).map(el => el.id),
+                        'portfolio-checklist-symbol',
+                        'results-search-symbol',
+                        'profit-search-symbol',
+                        'history-search-symbol',
+                        'symbol' // fallback
+                    ];
+                    for (var i = 0; i < ids.length; i++) {
+                        var el = document.getElementById(ids[i]);
+                        if (el && el.offsetParent !== null && (!el.closest('.tab-content') || el.closest('.tab-content').classList.contains('active'))) {
+                            el.focus(); el.select(); break;
+                        }
+                    }
+                }
+
+                // Additional keyboard shortcuts
+                if (event.ctrlKey || event.metaKey) {
+                    switch (event.key) {
+                        case 'r':
+                            event.preventDefault();
+                            if (typeof refreshData === 'function') {
+                                refreshData();
+                            } else {
+                                location.reload();
+                            }
+                            break;
+                        case 's':
+                            event.preventDefault();
+                            const searchInput = document.getElementById('search-symbol') ||
+                                document.getElementById('watchlist-symbol') ||
+                                document.getElementById('history-search-symbol');
+                            if (searchInput) {
+                                searchInput.focus();
+                                searchInput.select();
+                            }
+                            break;
+                        case 'Enter':
+                            event.preventDefault();
+                            const submitBtn = document.querySelector('.submit-btn');
+                            if (submitBtn && submitBtn.offsetParent !== null) {
+                                submitBtn.click();
+                            }
+                            break;
+                    }
+                }
+
+                // Escape key to close modals/overlays
+                if (event.key === 'Escape') {
+                    hideLoading();
+                    const calcRows = document.querySelectorAll('.inline-calculator-row');
+                    calcRows.forEach(row => row.style.display = 'none');
+                }
+            });
+
+            // --- FEATURE: AUTOCOMPLETE & SMART-LOCK ---
+            function setupAutocomplete(inputElement) {
+                let currentFocus;
+                inputElement.addEventListener("input", function (e) {
+                    let val = this.value;
+                    closeAllLists();
+                    if (!val) return;
+                    currentFocus = -1;
+                    let suggestionsDiv = document.createElement("DIV");
+                    suggestionsDiv.setAttribute("id", this.id + "autocomplete-list");
+                    suggestionsDiv.setAttribute("class", "autocomplete-items");
+                    this.parentNode.appendChild(suggestionsDiv);
+                    fetch(`/search-tickers?q=${val}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            data.forEach(item => {
+                                let itemDiv = document.createElement("DIV");
+                                itemDiv.innerHTML = "<strong>" + item.substr(0, val.length) + "</strong>" + item.substr(val.length);
+                                itemDiv.innerHTML += "<input type='hidden' value='" + item + "'>";
+                                itemDiv.addEventListener("click", function (e) {
+                                    inputElement.value = this.getElementsByTagName("input")[0].value;
+                                    inputElement.dispatchEvent(new Event('blur'));
+                                    closeAllLists();
+                                });
+                                suggestionsDiv.appendChild(itemDiv);
+                            });
+                        });
+                });
+                inputElement.addEventListener("keydown", function (e) {
+                    let list = document.getElementById(this.id + "autocomplete-list");
+                    if (list) list = list.getElementsByTagName("div");
+                    if (!list) return;
+                    if (e.key === "ArrowDown") { currentFocus++; addActive(list); }
+                    else if (e.key === "ArrowUp") { currentFocus--; addActive(list); }
+                    else if (e.key === "Enter") {
+                        e.preventDefault();
+                        if (currentFocus > -1) { if (list) list[currentFocus].click(); }
+                    }
+                    else if (e.key === "Tab" || e.key === "Escape") { closeAllLists(); }
+                });
+                function addActive(list) {
+                    if (!list) return false;
+                    removeActive(list);
+                    if (currentFocus >= list.length) currentFocus = 0;
+                    if (currentFocus < 0) currentFocus = (list.length - 1);
+                    list[currentFocus].classList.add("autocomplete-active");
+                    list[currentFocus].scrollIntoView({ block: "nearest" });
+                }
+                function removeActive(list) { for (let i = 0; i < list.length; i++) { list[i].classList.remove("autocomplete-active"); } }
+                function closeAllLists(elmnt) {
+                    var x = document.getElementsByClassName("autocomplete-items");
+                    for (var i = 0; i < x.length; i++) {
+                        if (elmnt != x[i] && elmnt != inputElement) { x[i].parentNode.removeChild(x[i]); }
+                    }
+                }
+                document.addEventListener("click", function (e) { closeAllLists(e.target); });
+            }
+            function setupSmartLocking(inputElement) {
+                const athProfitSelect = document.getElementById('ath_profit');
+                const indexTypeSelect = document.getElementById('idx_type');
+                function unlockFields() {
+                    athProfitSelect.value = ""; athProfitSelect.disabled = false;
+                    indexTypeSelect.value = ""; indexTypeSelect.disabled = false;
+                }
+                inputElement.addEventListener('input', function () { if (this.value.trim() === '') { unlockFields(); } });
+                inputElement.addEventListener('blur', function () {
+                    const symbol = this.value.trim().toUpperCase();
+                    if (symbol) {
+                        fetch(`/get-profit-data/${symbol}`)
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data) {
+                                    athProfitSelect.value = data.ath_profit; athProfitSelect.disabled = true;
+                                    indexTypeSelect.value = data.idx_type; indexTypeSelect.disabled = true;
+                                } else { unlockFields(); }
+                            });
+                    } else { unlockFields(); }
+                });
+            }
+            const mainTickerInput = document.getElementById('symbol');
+            if (mainTickerInput) {
+                setupAutocomplete(mainTickerInput);
+                setupSmartLocking(mainTickerInput);
+            }
+
+            // --- FEATURE: POSITION SIZING CALCULATORS ---
+            const totalCapitalInput = document.getElementById('calc-total-capital');
+            const riskPctInput = document.getElementById('calc-risk-pct');
+            if (totalCapitalInput) {
+                if (localStorage.getItem('totalCapital')) totalCapitalInput.value = localStorage.getItem('totalCapital');
+                if (localStorage.getItem('riskPct')) riskPctInput.value = localStorage.getItem('riskPct');
+                totalCapitalInput.addEventListener('input', (e) => localStorage.setItem('totalCapital', e.target.value));
+                riskPctInput.addEventListener('input', (e) => localStorage.setItem('riskPct', e.target.value));
+            }
+            function calculatePosition(entry, sl, capital, risk) {
+                if (isNaN(capital) || isNaN(risk) || isNaN(entry) || isNaN(sl) || capital <= 0 || risk <= 0 || entry <= 0 || sl <= 0) return { error: "Please fill all fields with positive numbers." };
+                if (entry <= sl) return { error: "Entry price must be higher than stop loss." };
+                const riskPerShare = entry - sl;
+                const capitalToRisk = capital * (risk / 100);
+                const sharesToBuy = Math.floor(capitalToRisk / riskPerShare);
+                const amountRequired = sharesToBuy * entry;
+                const allocation = (amountRequired / capital) * 100;
+                return { shares: sharesToBuy, amount: amountRequired.toFixed(2), allocation: allocation.toFixed(2) };
+            }
+            const globalCalcBtn = document.getElementById('global-calc-btn');
+            if (globalCalcBtn) {
+                globalCalcBtn.addEventListener('click', () => {
+                    const resultsDiv = document.getElementById('global-calc-results');
+                    const result = calculatePosition(
+                        parseFloat(document.getElementById('calc-entry-price').value),
+                        parseFloat(document.getElementById('calc-stop-loss').value),
+                        parseFloat(totalCapitalInput.value),
+                        parseFloat(riskPctInput.value)
+                    );
+                    if (result.error) { resultsDiv.innerHTML = `<span style="color:var(--danger-color)">${result.error}</span>`; }
+                    else { resultsDiv.innerHTML = `Shares: <b>${result.shares}</b> | Amount: <b>₹${result.amount}</b> | Allocation: <b>${result.allocation}%</b>`; }
+                });
+            }
+
+            // --- NEW: Logic for Tabbed Interfaces ---
+            function setupTabs() {
+                const tabLinks = document.querySelectorAll('.tab-nav a');
+                const tabContents = document.querySelectorAll('.tab-content');
+
+                tabLinks.forEach(link => {
+                    link.addEventListener('click', function (e) {
+                        // Only prevent default for real tab links (those with data-tab)
+                        const targetId = this.getAttribute('data-tab');
+                        if (!targetId) return; // Allow normal navigation for links without data-tab
+                        e.preventDefault();
+
+                        tabLinks.forEach(innerLink => innerLink.classList.remove('active'));
+                        tabContents.forEach(content => content.classList.remove('active'));
+
+                        this.classList.add('active');
+                        document.getElementById(targetId).classList.add('active');
+                    });
+                });
+            }
+            // Call the function if we are on a page with tabs
+            if (document.querySelector('.tab-nav')) {
+                setupTabs();
+            }
+
+            // --- Attach features to all designated input fields ---
+            function initializeAutocompleteOnVisibleInputs() {
+                const autocompleteInputs = document.querySelectorAll('.ticker-autocomplete');
+                autocompleteInputs.forEach(input => {
+                    // Only initialize if visible and not already initialized
+                    if (input.offsetParent !== null && !input.dataset.autocompleteInitialized) {
+                        setupAutocomplete(input);
+                        input.dataset.autocompleteInitialized = 'true';
+                    }
+                });
+            }
+            initializeAutocompleteOnVisibleInputs();
+
+            // Re-initialize autocomplete when tabs are switched
+            if (document.querySelector('.tab-nav')) {
+                setupTabs = (function (origSetupTabs) {
+                    return function () {
+                        const tabLinks = document.querySelectorAll('.tab-nav a');
+                        const tabContents = document.querySelectorAll('.tab-content');
+                        tabLinks.forEach(link => {
+                            link.addEventListener('click', function (e) {
+                                const targetId = this.getAttribute('data-tab');
+                                if (!targetId) return;
+                                setTimeout(initializeAutocompleteOnVisibleInputs, 10);
+                            });
+                        });
+                        if (origSetupTabs) origSetupTabs();
+                    };
+                })(typeof setupTabs !== 'undefined' ? setupTabs : null);
+                setupTabs();
+            }
+
+            document.querySelectorAll('.calc-toggle-btn').forEach(btn => {
+                btn.addEventListener('click', e => {
+                    const row = e.target.closest('.stock-row');
+                    const calcRow = row.nextElementSibling;
+                    calcRow.style.display = calcRow.style.display === 'none' ? 'table-row' : 'none';
+                    calcRow.querySelector('.inline-stop-loss').value = row.getAttribute('data-sl') || 'Not Set';
+                });
+            });
+
+            document.querySelectorAll('.inline-calc-btn').forEach(btn => {
+                btn.addEventListener('click', e => {
+                    const calcRow = e.target.closest('.inline-calculator-row');
+                    const stockRow = calcRow.previousElementSibling;
+                    const category = stockRow.getAttribute('data-category');
+                    const resultsDiv = calcRow.querySelector('.inline-calc-results');
+                    const result = calculatePosition(
+                        parseFloat(calcRow.querySelector('.inline-entry-price').value),
+                        parseFloat(stockRow.getAttribute('data-sl')),
+                        parseFloat(totalCapitalInput.value),
+                        parseFloat(riskPctInput.value)
+                    );
+                    if (result.error) { resultsDiv.innerHTML = `<span style="color:var(--danger-color)">${result.error}</span>`; }
+                    else {
+                        const sharesStyle = category === 'PROP' ? 'font-weight: 700; color: var(--primary-color);' : '';
+                        const allocStyle = category === 'FUND' ? 'font-weight: 700; color: var(--primary-color);' : '';
+                        resultsDiv.innerHTML = `Shares: <b style="${sharesStyle}">${result.shares}</b> | Amount: <b>₹${result.amount}</b> | Allocation: <b style="${allocStyle}">${result.allocation}%</b>`;
+                    }
+                });
+            });
+
+            // --- DARK MODE TOGGLE ---
+            const darkToggle = document.getElementById('dark-toggle');
+            const darkToggleIcon = document.getElementById('dark-toggle-icon');
+            const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+            function setDarkMode(isDark) {
+                if (isDark) {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                    darkToggleIcon.textContent = '☀️'; // Sun icon
+                    localStorage.setItem('theme', 'dark');
+                    console.log('Dark mode enabled');
+                } else {
+                    document.documentElement.setAttribute('data-theme', 'light');
+                    darkToggleIcon.textContent = '🌙'; // Moon icon
+                    localStorage.setItem('theme', 'light');
+                    console.log('Light mode enabled');
+                }
+            }
+
+            function toggleDarkMode() {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                setDarkMode(newTheme === 'dark');
+                console.log('Dark mode toggled:', currentTheme, '->', newTheme);
+            }
+
+            // Set initial theme based on user preference or system preference
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                setDarkMode(savedTheme === 'dark');
+                console.log('Using saved theme:', savedTheme);
+            } else if (prefersDarkScheme.matches) {
+                setDarkMode(true); // Default to dark if no preference saved and system prefers dark
+                console.log('Using system dark preference');
+            } else {
+                setDarkMode(false); // Default to light if no preference saved and system prefers light
+                console.log('Using system light preference');
+            }
+
+            if (darkToggle) {
+                darkToggle.addEventListener('click', toggleDarkMode);
+                console.log('Dark toggle button found and event listener added');
+            } else {
+                console.error('Dark toggle button not found!');
+            }
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Rename Portfolio{% endblock %}
+{% block content %}
+    <div style="max-width: 500px; margin: 4em auto;">
+        <h2>Rename Portfolio</h2>
+        <form method="post">
+            <div class="form-grid" style="grid-template-columns: 1fr;">
+                <div>
+                    <label for="portfolio_name">New Portfolio Name</label>
+                    <input type="text" id="portfolio_name" name="portfolio_name" required value="{{ portfolio.name }}">
+                </div>
+            </div>
+            <button type="submit" class="submit-btn">Save New Name</button>
+            <a href="{{ url_for('portfolio') }}" style="display:block; text-align:center; margin-top:1em; color: var(--secondary-color);">Cancel</a>
+        </form>
+    </div>
+{% endblock %}

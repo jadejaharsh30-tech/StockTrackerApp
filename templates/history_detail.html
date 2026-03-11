@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}History for {{ date }} - ATH Tracker{% endblock %}
+
+{% block content %}
+    <h2>Historical Log for: <span style="color: var(--primary-color);">{{ date }}</span></h2>
+    <a href="{{ url_for('history') }}" style="display: inline-block; margin-bottom: 1.5em;">&larr; Back to Summary</a>
+
+    <form action="{{ url_for('delete_history_entries') }}" method="post">
+        <input type="hidden" name="log_date" value="{{ date }}">
+        
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all-checkbox"></th>
+                        <th>Symbol</th>
+                        <th>EOD Price (₹)</th>
+                        <th>Category</th>
+                        <th>Final Trigger</th>
+                        <th>Remarks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in records %}
+                    <tr>
+                        <td><input type="checkbox" name="log_ids" value="{{ record.id }}"></td>
+                        <td><b>{{ record.symbol }}</b><br><small>Rounding: {{ record.rounding_price }} | SL: {{ record.stop_loss or 'N/A' }}</small></td>
+                        <td>{{ record.eod_price }}</td>
+                        <td>{{ record.category }}</td>
+                        <td><span class="trigger-{{ record.final_trigger.lower() }}">{{ record.final_trigger }}</span></td>
+                        <td>{{ record.remarks }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 40px;">No records found for this date.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if records %}
+        <div style="margin-top: 1em; text-align: right;">
+            <button type="submit" class="delete-btn" onclick="return confirm('Are you sure you want to permanently delete the selected records from this log?');">Delete Selected Records</button>
+        </div>
+        {% endif %}
+    </form>
+
+    <script>
+        document.getElementById('select-all-checkbox').addEventListener('click', function(event) {
+            const checkboxes = document.querySelectorAll('input[name="log_ids"]');
+            checkboxes.forEach(function(checkbox) {
+                checkbox.checked = event.target.checked;
+            });
+        });
+    </script>
+{% endblock %}

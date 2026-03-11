@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}History - ATH Tracker{% endblock %}
+
+{% block content %}
+<h2>Historical Log</h2>
+
+<div class="card">
+    <form action="{{ url_for('history_search') }}" method="get" class="search-form">
+        <input type="text" id="history-search-symbol" class="ticker-autocomplete" name="search_symbol"
+            placeholder="Search Symbol..." value="{{ search_term or '' }}" autocomplete="off">
+        <input type="date" name="start_date">
+        <input type="date" name="end_date">
+        <button type="submit" class="submit-btn" style="padding: 8px 12px; margin-top: 0;">Filter</button>
+    </form>
+
+    <div class="backup-controls">
+        <form action="{{ url_for('upload_history') }}" method="post" enctype="multipart/form-data"
+            style="all:initial; display:flex; gap:8px; align-items:center;">
+            <input type="file" name="excel_file" required>
+            <button type="submit" class="edit-btn" style="background-color: var(--primary-color);">Upload</button>
+        </form>
+        <a href="{{ url_for('download_history') }}" class="edit-btn"
+            style="background-color: var(--success-color);">Download</a>
+    </div>
+</div>
+
+<h3>Daily Summary</h3>
+<div style="display: flex; flex-direction: column; gap: 1em;">
+    {% for month, days in grouped_history.items() %}
+    <details class="card glass-card" {% if loop.first %}open{% endif %}
+        style="padding: 0; overflow: hidden; margin-bottom: 0;">
+        <summary
+            style="background: rgba(var(--primary-rgb), 0.05); padding: 1em; border-bottom: 1px solid var(--glass-border); font-weight: 700; color: var(--primary-color); cursor: pointer; user-select: none; display: flex; justify-content: space-between; align-items: center;">
+            <span>{{ month }}</span>
+            <span class="chevron" style="transition: transform 0.3s;">▼</span>
+        </summary>
+        <ul style="list-style: none; margin: 0; padding: 0;">
+            {% for day in days %}
+            <li
+                style="border-bottom: 1px solid rgba(0,0,0,0.05); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s;">
+                <a href="{{ url_for('history_detail', log_date=day.log_date) }}"
+                    style="text-decoration: none; color: var(--secondary-color); font-weight: 500; display: block; flex-grow: 1;">
+                    {{ day.log_date }}
+                </a>
+                <span class="history-badge"
+                    style="background: var(--light-grey); color: var(--secondary-color); font-size: 0.8em; padding: 2px 8px; border-radius: 12px;">
+                    {{ day.stock_count }} Entries
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+    </details>
+    {% else %}
+    <div class="card" style="text-align: center; padding: 3em;">
+        <div style="font-size: 3em; margin-bottom: 0.2em; opacity: 0.5;">📜</div>
+        <p>Your historical log is empty.</p>
+    </div>
+    {% endfor %}
+</div>
+
+<style>
+    /* Hide default details marker */
+    details>summary {
+        list-style: none;
+    }
+
+    details>summary::-webkit-details-marker {
+        display: none;
+    }
+
+    /* Chevron rotation */
+    details[open] summary .chevron {
+        transform: rotate(180deg);
+    }
+
+    /* Hover effect for summary */
+    details>summary:hover {
+        background: rgba(var(--primary-rgb), 0.1) !important;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+
+{% block title %}Turtle Research Terminal{% endblock %}
+
+{% block content %}
+<div class="terminal-wrapper" style="max-width: 1600px; margin: 0 auto; font-family: 'Inter', sans-serif;">
+
+    <!-- ROW 1: LEADERSHIP HEALTH (KPI TILES) -->
+    <h6 class="section-label mb-3 ps-1"><i class="fas fa-heartbeat me-2"></i>Market Health</h6>
+    <div class="kpi-grid mb-5">
+        <!-- KPI 1: Stocks at ATH -->
+        <div class="kpi-card">
+            <div class="kpi-header">
+                <span class="kpi-title">Stocks at ATH</span>
+                <span
+                    class="kpi-value text-2xl font-bold {{ 'text-green-600' if (kpi.ath_price_pct or 0) > 10 else 'text-red-500' }}">
+                    {{ "%.1f"|format(kpi.ath_price_pct or 0) }}%
+                </span>
+            </div>
+            <div class="sparkline-container" style="height: 40px; width: 100%;">
+                <canvas id="sparkATH"></canvas>
+            </div>
+        </div>
+
+        <!-- KPI 2: Breadth (200 DMA) -->
+        <div class="kpi-card">
+            <div class="kpi-header">
+                <span class="kpi-title">% > 200 DMA</span>
+                <span
+                    class="kpi-value text-2xl font-bold {{ 'text-green-600' if (kpi.above_200dma or 0) > 50 else 'text-yellow-600' }}">
+                    {{ "%.1f"|format(kpi.above_200dma or 0) }}%
+                </span>
+            </div>
+            <div class="sparkline-container" style="height: 40px; width: 100%;">
+                <canvas id="sparkDMA"></canvas>
+            </div>
+        </div>
+
+        <!-- KPI 3: Regime -->
+        <div class="kpi-card">
+            <div class="kpi-header">
+                <span class="kpi-title">Market Regime</span>
+                <div class="kpi-value text-xl font-bold text-dark"
+                    style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    {{ kpi.regime or 'Calculating...' }}
+                </div>
+            </div>
+            <div class="regime-indicator mt-2">
+                <div class="progress" style="height: 6px; background-color: #e9ecef;">
+                    <div class="progress-bar {{ 'bg-success' if 'BULLISH' in (kpi.regime or '') else 'bg-danger' }}"
+                        role="progressbar" style="width: 100%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KPI 4: Action -->
+        <div class="kpi-card flex items-center justify-center bg-gray-50 border-dashed">
+            <form action="{{ url_for('run_market_scan') }}" method="POST"
+                class="w-100 m-0 p-0 border-0 shadow-none bg-transparent">
+                <button type="submit" class="btn btn-primary btn-sm w-full font-bold shadow-sm">
+                    <i class="fas fa-sync-alt mr-2"></i> Run Daily Scan
+                </button>
+            </form>
+            <div class="text-xs text-muted mt-2 text-center w-100">Last updated: {{ kpi.date or 'Never' }}</div>
+        </div>
+    </div>
+
+    <!-- ROW 2: MAIN SPLIT VIEW -->
+    <h6 class="section-label mb-3 ps-1"><i class="fas fa-crosshairs me-2"></i>Leadership Scanner</h6>
+    <div class="main-split-grid">
+
+        <!-- LEFT PANEL: TURTLE QUALIFIERS (TABLE) -->
+        <div class="card glass-card h-full">
+            <div class="card-header border-bottom p-3 flex justify-between items-center bg-white rounded-t-lg">
+                <h5 class="m-0 font-bold text-gray-800"><i class="fas fa-list-ol mr-2 text-primary"></i> Turtle
+                    Qualifiers</h5>
+                <span class="badge bg-light text-dark border">Top 50</span>
+            </div>
+            <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+                <table class="table table-hover table-sm mb-0 sticky-header text-sm">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-3">Symbol</th>
+                            <th>Sector</th>
+                            <th class="text-center">ATH?</th>
+                            <th class="text-end">RS Rank</th>
+                            <th class="text-end">Score</th>
+                            <th class="text-end">Tech</th>
+                            <th class="text-center">Trend</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in qualifiers %}
+                        <tr class="cursor-pointer hover:bg-gray-50 transition-colors"
+                            onclick="loadCompanyView('{{ row.symbol }}')">
+                            <td class="fw-bold ps-3 text-primary">{{ row.symbol }}</td>
+                            <td class="text-muted text-xs">{{ row.sector or '-' }}</td>
+                            <td class="text-center">
+                                {% if row.ath_flag == 'YES' %}
+                                <span
+                                    class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2">ATH</span>
+                                {% else %}
+                                <span class="text-muted text-xs">-</span>
+                                {% endif %}
+                            </td>
+                            <td
+                                class="text-end fw-semibold {{ 'text-green-600' if row.rs_rank > 80 else 'text-gray-600' }}">
+                                {{ "%.0f"|format(row.rs_rank) }}
+                            </td>
+                            <td class="text-end fw-bold {{ score_color(row.overall_score) }}"
+                                style="color: {{ score_color(row.overall_score) }}">
+                                {{ "%.0f"|format(row.overall_score) }}
+                            </td>
+                            <td class="text-end text-xs text-muted">
+                                {{ "%.0f"|format(row.tech_score) }}
+                            </td>
+                            <td class="text-center text-xs">
+                                <span
+                                    class="badge {{ 'bg-success' if row.trend_state == 'UP' or row.trend_state == 'BREAKOUT' else 'bg-secondary' }}">
+                                    {{ row.trend_state }}
+                                </span>
+                            </td>
+                            <td class="text-end pe-3">
+                                <i class="fas fa-chevron-right text-gray-300 text-xs"></i>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center py-4 text-muted">
+                                No qualifiers found. Run the daily scan to populate data.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- RIGHT PANEL: SECTOR & FACTORS -->
+        <div class="flex flex-col gap-4">
+
+            <!-- Quick Links / Factors -->
+            <div class="card glass-card p-3">
+                <h6 class="text-xs font-bold text-uppercase text-muted border-bottom pb-2 mb-2">Market Drivers</h6>
+                <div class="flex flex-col gap-2">
+                    <div class="flex justify-between items-center bg-green-50 p-2 rounded border border-green-100">
+                        <span class="text-sm font-semibold text-green-800">Momentum</span>
+                        <span class="badge bg-success text-xs">Leading</span>
+                    </div>
+                    <div class="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100">
+                        <span class="text-sm font-semibold text-gray-800">Value</span>
+                        <span class="badge bg-secondary text-xs">Lagging</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Future Sector Module Placeholder -->
+            <div
+                class="card glass-card p-4 text-center h-full flex items-center justify-center text-muted border-dashed">
+                <div>
+                    <i class="fas fa-chart-pie text-3xl mb-2 opacity-50"></i>
+                    <p class="text-sm">Sector Analytics<br>(Coming Soon)</p>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<!-- SLIDE-OVER DRAWER FOR COMPANY VIEW -->
+<div id="companyDrawer" class="drawer-overlay" onclick="closeCompanyView(event)">
+    <div class="drawer-content slide-in-right">
+        <button class="drawer-close" onclick="closeCompanyView(event)">✕</button>
+        <div id="drawerBody" class="h-full overflow-y-auto p-4">
+            <!-- Content loaded via AJAX -->
+            <div class="flex items-center justify-center h-full">
+                <div class="spinner-border text-primary" role="status"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* HIGH DENSITY GRID */
+    .terminal-wrapper {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        /* Allow grow */
+        padding: 0 10px 40px 10px;
+        /* Add bottom padding */
+    }
+
+    .section-label {
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #64748b;
+        /* Slate 500 */
+        margin-top: 10px;
+        margin-bottom: 8px;
+        /* Reduce margin */
+    }
+
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        /* Tighter gap */
+        margin-bottom: 1.5rem !important;
+        /* Reduce bottom margin */
+    }
+
+    .kpi-card {
+        background: white;
+        border-radius: 10px;
+        /* Slightly smaller radius */
+        padding: 12px 16px;
+        /* Reduced padding */
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.05);
+        /* Lighter shadow */
+        transition: transform 0.2s, box-shadow 0.2s;
+        min-height: 100px;
+        /* Reduce height constraint */
+    }
+
+    .sparkline-container {
+        height: 35px !important;
+        /* Slightly smaller sparkline */
+    }
+
+    .kpi-value {
+        font-size: 1.5rem !important;
+        /* Slightly smaller font */
+    }
+
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 12px -3px rgba(0, 0, 0, 0.1);
+        border-color: var(--primary-color);
+    }
+
+    .kpi-title {
+        display: block;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #64748b;
+        margin-bottom: 4px;
+    }
+
+    .main-split-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 20px;
+        flex-grow: 1;
+        /* Remove overflow hidden to allow page scroll */
+    }
+
+    /* Glass Card refinements */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.95);
+        /* More opaque for contrast */
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        border-radius: 12px;
+    }
+
+    /* Remove internal scroll for table to allow page scroll */
+    .table-responsive {
+        max-height: none !important;
+        overflow-y: visible !important;
+    }
+
+    .sticky-header th {
+        /* Keep sticky header if they want page scroll? 
+           Sticky relative to window requires top: ?? 
+           If use page scroll, sticky header works relative to viewport if 
+           parent doesn't hide overflow. */
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: #f8fafc;
+        /* Slate 50 */
+        border-bottom: 2px solid #e2e8f0;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+        font-weight: 700;
+        color: #475569;
+    }
+
+    /* DRAWER STYLES */
+    .drawer-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(15, 23, 42, 0.4);
+        /* Darker overlay */
+        z-index: 1050;
+        display: none;
+        backdrop-filter: blur(4px);
+    }
+
+    .drawer-content {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 800px;
+        /* Wider drawer for full analysis */
+        height: 100%;
+        background: white;
+        box-shadow: -10px 0 25px rgba(0, 0, 0, 0.1);
+        transform: translateX(100%);
+        transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        display: flex;
+        flex-direction: column;
+    }
+
+    #drawerBody {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+        background: #f8fafc;
+    }
+
+    .drawer-overlay.active {
+        display: block;
+    }
+
+    .drawer-overlay.active .drawer-content {
+        transform: translateX(0);
+    }
+
+    .drawer-close {
+        position: absolute;
+        top: 20px;
+        left: -50px;
+        /* Move close button outside */
+        background: white;
+        border: none;
+        width: 40px;
+        height: 40px;
+        border-radius: 50% 0 0 50%;
+        font-size: 1.2rem;
+        cursor: pointer;
+        z-index: 1060;
+        color: #475569;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: -4px 2px 10px rgba(0, 0, 0, 0.05);
+    }
+
+    .drawer-close:hover {
+        background: #f1f5f9;
+        color: #0f172a;
+        transform: scale(1.1);
+    }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // SPARKLINE RENDER LOGIC
+    document.addEventListener("DOMContentLoaded", function () {
+        // Mock data if empty
+        const sparkData = {{ sparklines | tojson
+    }};
+
+    function renderSpark(id, dataKey, color) {
+        const ctx = document.getElementById(id);
+        if (!ctx) return;
+
+        const data = sparkData.map(d => d[dataKey] || 0);
+        const labels = sparkData.map(d => d.date);
+
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: data,
+                    borderColor: color,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                scales: {
+                    x: { display: false },
+                    y: { display: false }
+                },
+                layout: { padding: 0 }
+            }
+        });
+    }
+
+    if (sparkData.length > 0) {
+        renderSpark('sparkATH', 'ath_price_pct', '#10B981'); // Green
+        renderSpark('sparkDMA', 'above_200dma', '#3B82F6'); // Blue
+    }
+    });
+
+    // DRAWER LOGIC
+    function loadCompanyView(symbol) {
+        document.getElementById('companyDrawer').classList.add('active');
+        const body = document.getElementById('drawerBody');
+        body.innerHTML = '<div class="flex items-center justify-center h-full"><div class="spinner-border text-primary" role="status"></div></div>'; // Loading
+
+        // Fetch Fundamental Page Content (We might need a partial view route, or just load iframe/scrape)
+        // For MVP, we will redirect or use a simple fetch if we update backend to return partial
+        // Let's assume we want to redirect for now OR fetch just the content. 
+        // Best approach: iframe for full functionality without refactoring fundamental_analysis.html template inheritance?
+        // Or specific route returning fragment.
+
+        // Let's use iframe for absolute robustness
+        body.innerHTML = `<iframe src="/fundamental-analysis?symbol=${symbol}&embed=true" style="flex: 1; width: 100%; border: none;"></iframe>`;
+    }
+
+    function closeCompanyView(e) {
+        if (e.target === document.getElementById('companyDrawer') || e.target.classList.contains('drawer-close')) {
+            document.getElementById('companyDrawer').classList.remove('active');
+        }
+    }
+</script>
+{% endblock %}

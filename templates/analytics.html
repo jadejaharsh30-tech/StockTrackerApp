@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+
+{% block title %}Sector Deep Analytics | Turtle Wealth{% endblock %}
+
+{% block content %}
+<div class="analytics-container" style="max-width: 1440px; margin: 0 auto; padding: 0 24px;">
+
+    <!-- HEADER -->
+    <div
+        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #E0E0E0; padding-bottom: 16px;">
+        <div>
+            <div style="display:flex; align-items:center; gap:10px;">
+                <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #333;">Sector Deep Analytics</h2>
+                <span
+                    style="font-size: 11px; background: #e3f2fd; color: #1976d2; padding: 2px 6px; border-radius: 4px; font-weight: 600;">BETA</span>
+            </div>
+            <p style="margin: 4px 0 0; color: #666; font-size: 13px;">Aggregate Fundamental & Risk Metrics across
+                Universe</p>
+        </div>
+
+        <div class="controls" style="display: flex; gap: 12px; align-items: center;">
+            <div class="toggle-group"
+                style="background: #f5f5f5; padding: 4px; border-radius: 6px; border: 1px solid #ddd;">
+                <a href="?mode=market_cap" class="toggle-btn {{ 'active' if mode == 'market_cap' else '' }}">Market Cap
+                    Weighted</a>
+                <a href="?mode=equal" class="toggle-btn {{ 'active' if mode == 'equal' else '' }}">Equal Weight</a>
+            </div>
+            <button class="action-btn">Export Matrix</button>
+        </div>
+    </div>
+
+    <div class="sector-grid" style="display: grid; grid-template-columns: 3fr 1fr; gap: 24px;">
+
+        <!-- LEFT: SECTOR RANKING TABLE -->
+        <div class="sector-ranking-panel">
+            <h3 style="font-size: 16px; margin-bottom: 12px; font-weight: 600;">Sector Leaderboard</h3>
+
+            <div class="table-container">
+                <table class="sector-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 180px;">Sector</th>
+                            <th style="text-align: center;">Size</th>
+                            <th style="text-align: center;">Overall</th>
+                            <th style="text-align: center;">Growth</th>
+                            <th style="text-align: center;">Quality</th>
+                            <th style="text-align: center;">Value</th>
+                            <th style="text-align: center;">Tech</th>
+                            <th style="text-align: center; border-left: 1px solid #eee;">Risk (DD)</th>
+                            <th style="text-align: center;">Avg D/E</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for sector in sectors %}
+                        <tr>
+                            <td>
+                                <div style="font-weight: 600; font-size: 13px;">{{ sector.sector }}</div>
+                                <div style="font-size: 10px; color: #888;">{{ sector.count }} Stocks</div>
+                            </td>
+                            <td style="text-align: center; color: #666; font-size: 12px;">₹{{ (sector.avg_mcap /
+                                10000000) | int }}Cr</td>
+
+                            <!-- Overall Score -->
+                            <td style="text-align: center;">
+                                <div class="heatmap-cell"
+                                    style="background-color: {{ score_color(sector.overall_score) }};">
+                                    {{ sector.overall_score }}
+                                </div>
+                            </td>
+
+                            <!-- Pillar Heatmap (Using correct Capitalized Keys) -->
+                            <td style="text-align: center;">
+                                <span class="mini-score" style="color: {{ text_color(sector.pillars.Growth) }};">
+                                    {{ sector.pillars.Growth }}
+                                </span>
+                            </td>
+                            <td style="text-align: center;">
+                                <span class="mini-score" style="color: {{ text_color(sector.pillars.Profitability) }};">
+                                    {{ sector.pillars.Profitability }}
+                                </span>
+                            </td>
+                            <td style="text-align: center;">
+                                <span class="mini-score" style="color: {{ text_color(sector.pillars.Valuation) }};">
+                                    {{ sector.pillars.Valuation }}
+                                </span>
+                            </td>
+                            <td style="text-align: center;">
+                                <span class="mini-score" style="color: {{ text_color(sector.pillars.Technicals) }};">
+                                    {{ sector.pillars.Technicals }}
+                                </span>
+                            </td>
+
+                            <!-- Risk Metrics -->
+                            <td style="text-align: center; border-left: 1px solid #eee;">
+                                <span
+                                    style="font-size: 12px; font-weight: 600; color: {{ '#C62828' if sector.risk.drawdown > 15 else '#555' }};">
+                                    -{{ sector.risk.drawdown }}%
+                                </span>
+                            </td>
+                            <td style="text-align: center;">
+                                <span style="font-size: 12px; color: #555;">
+                                    {{ sector.risk.debt_to_equity }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- RIGHT: RISK & BREADTH -->
+        <div class="risk-panel">
+            <!-- Breadth Card -->
+            <div class="card" style="margin-bottom: 20px;">
+                <h4 class="card-title">Market Breadth</h4>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px;">
+                    <span style="color: #2E7D32; font-weight: bold;">Advances</span>
+                    <span style="color: #2E7D32;">{{ breadth.advances }}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 16px; font-size: 13px;">
+                    <span style="color: #C62828; font-weight: bold;">Declines</span>
+                    <span style="color: #C62828;">{{ breadth.declines }}</span>
+                </div>
+                <div class="breadth-bar"
+                    style="height: 6px; background: #FFCDD2; border-radius: 3px; overflow: hidden;">
+                    <div
+                        style="height: 100%; background: #C8E6C9; width: {{ (breadth.advances / (breadth.advances + breadth.declines + 1)) * 100 }}%;">
+                    </div>
+                </div>
+                <div style="text-align: center; margin-top: 10px; font-size: 11px; color: #888;">Nifty 500 Universe
+                </div>
+            </div>
+
+            <!-- Risk Matrix Card -->
+            <div class="card">
+                <h4 class="card-title">Low Risk Sectors</h4>
+                <div style="font-size: 11px; color: #666; margin-bottom: 12px;">Ranked by lowest Avg Drawdown</div>
+
+                <table class="risk-table">
+                    <thead>
+                        <tr>
+                            <th>Sector</th>
+                            <th style="text-align: right;">Avg DD</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Sort by Drawdown manually in UI or assume Backend logic -->
+                        {% for sector in sectors|sort(attribute='risk.drawdown') %}
+                        {% if loop.index <= 5 %} <tr>
+                            <td>{{ sector.sector }}</td>
+                            <td style="text-align: right; color: #C62828;">-{{ sector.risk.drawdown }}%</td>
+                            </tr>
+                            {% endif %}
+                            {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Styling for Heatmap */
+    .heatmap-cell {
+        display: inline-block;
+        width: 36px;
+        height: 28px;
+        line-height: 28px;
+        border-radius: 4px;
+        color: white;
+        font-weight: 700;
+        font-size: 12px;
+    }
+
+    .mini-score {
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    /* Buttons */
+    .toggle-btn {
+        padding: 6px 12px;
+        font-size: 12px;
+        text-decoration: none;
+        color: #555;
+        border-radius: 4px;
+        transition: all 0.2s;
+        font-weight: 500;
+    }
+
+    .toggle-btn.active {
+        background: white;
+        color: #111;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        font-weight: 700;
+        border: 1px solid #ccc;
+    }
+
+    .action-btn {
+        background: #212121;
+        color: white;
+        border: none;
+        padding: 6px 16px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    /* Tables */
+    .sector-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        border-radius: 4px;
+        overflow: hidden;
+        border: 1px solid #E0E0E0;
+    }
+
+    .sector-table th {
+        background: #F9FAFB;
+        padding: 10px 12px;
+        border-bottom: 2px solid #EEE;
+        text-align: left;
+        font-size: 11px;
+        font-weight: 700;
+        color: #555;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .sector-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #F0F0F0;
+        font-size: 13px;
+        vertical-align: middle;
+    }
+
+    .sector-table tr:last-child td {
+        border-bottom: none;
+    }
+
+    .sector-table tr:hover {
+        background-color: #F8F9FA;
+    }
+
+    .card {
+        background: white;
+        padding: 16px;
+        border-radius: 6px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        border: 1px solid #E0E0E0;
+    }
+
+    .card-title {
+        margin: 0 0 12px 0;
+        font-size: 14px;
+        font-weight: 700;
+        color: #333;
+    }
+
+    .risk-table {
+        width: 100%;
+        font-size: 12px;
+    }
+
+    .risk-table th {
+        text-align: left;
+        padding-bottom: 8px;
+        color: #888;
+        font-weight: 600;
+    }
+
+    .risk-table td {
+        padding: 6px 0;
+        border-bottom: 1px solid #f9f9f9;
+    }
+</style>
+{% endblock %}

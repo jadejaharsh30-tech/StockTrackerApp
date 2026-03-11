@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Edit Profit Record - {{ item.symbol }}{% endblock %}
+{% block content %}
+<div style="max-width: 500px; margin: 4em auto;">
+    <h2>Edit Permanent Record for <span style="color:var(--primary-color);">{{ item.symbol }}</span></h2>
+    <form method="post">
+        <div class="form-grid" style="grid-template-columns: 1fr; gap: 20px;">
+            <div>
+                <label for="result_date">Result Date (Manual Override)</label>
+                <input type="text" id="result_date" name="result_date" placeholder="DD Mon YYYY or N/A" value="{{ item.result_date }}">
+            </div>
+            </div>
+        <button type="submit" class="submit-btn">Save Changes</button>
+        <a href="{{ url_for('profit_manager') }}" style="display:block; text-align:center; margin-top:1em; color: var(--secondary-color);">Cancel</a>
+    </form>
+</div>
+{% endblock %}

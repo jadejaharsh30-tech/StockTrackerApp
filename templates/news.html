@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Market News - ATH Tracker{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <h2>📰 Market News</h2>
+    <div style="font-size: 0.9em; color: var(--secondary-color);">
+        Curated headlines for your watchlist and Indian markets.
+    </div>
+</div>
+
+<div class="tabs-container"
+    style="margin-top: 1.5em; margin-bottom: 1.5em; border-bottom: 1px solid var(--glass-border);">
+    <button class="tab-btn active" onclick="openTab(event, 'general')">General Market</button>
+    <button class="tab-btn" onclick="openTab(event, 'dashboard')">Dashboard Stocks</button>
+    <button class="tab-btn" onclick="openTab(event, 'portfolio')">Portfolio Holdings</button>
+</div>
+
+<!-- GENERAL NEWS -->
+<div id="general" class="tab-content" style="display: block;">
+    <div class="news-grid"
+        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5em;">
+        {% for news in news_general %}
+        {% set loop_index = loop.index0 %}
+        {% include 'news_card_item.html' %}
+        {% else %}
+        <div style="grid-column: 1 / -1; text-align: center; padding: 4em;">
+            <p>No general market news available at the moment.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- DASHBOARD NEWS -->
+<div id="dashboard" class="tab-content" style="display: none;">
+    <div class="news-grid"
+        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5em;">
+        {% for news in news_dashboard %}
+        {% set loop_index = loop.index0 %}
+        {% include 'news_card_item.html' %}
+        {% else %}
+        <div style="grid-column: 1 / -1; text-align: center; padding: 4em;">
+            <p>No news found for your dashboard symbols.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- PORTFOLIO NEWS -->
+<div id="portfolio" class="tab-content" style="display: none;">
+    <div class="news-grid"
+        style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5em;">
+        {% for news in news_portfolio %}
+        {% set loop_index = loop.index0 %}
+        {% include 'news_card_item.html' %}
+        {% else %}
+        <div style="grid-column: 1 / -1; text-align: center; padding: 4em;">
+            <p>No news found for your portfolio holdings.</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<style>
+    .tab-btn {
+        background: none;
+        border: none;
+        padding: 10px 20px;
+        cursor: pointer;
+        font-size: 1em;
+        font-weight: 600;
+        color: var(--secondary-color);
+        border-bottom: 3px solid transparent;
+        transition: all 0.3s;
+    }
+
+    .tab-btn:hover {
+        color: var(--primary-color);
+        background: rgba(var(--primary-rgb), 0.05);
+    }
+
+    .tab-btn.active {
+        color: var(--primary-color);
+        border-bottom: 3px solid var(--primary-color);
+    }
+
+    .card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1) !important;
+    }
+
+    /* Animation for tab switch */
+    .tab-content {
+        animation: fadeIn 0.3s ease-in-out;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>
+
+<script>
+    function openTab(evt, tabName) {
+        var i, tabcontent, tablinks;
+        tabcontent = document.getElementsByClassName("tab-content");
+        for (i = 0; i < tabcontent.length; i++) {
+            tabcontent[i].style.display = "none";
+        }
+        tablinks = document.getElementsByClassName("tab-btn");
+        for (i = 0; i < tablinks.length; i++) {
+            tablinks[i].className = tablinks[i].className.replace(" active", "");
+        }
+        document.getElementById(tabName).style.display = "block";
+        evt.currentTarget.className += " active";
+    }
+</script>
+{% endblock %}

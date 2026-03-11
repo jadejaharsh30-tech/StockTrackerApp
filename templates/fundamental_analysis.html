@@ -1,0 +1,883 @@
+{% extends "base.html" %}
+
+{% block title %}Fundamental Analysis - Turtle Wealth{% endblock %}
+
+{% block content %}
+<div class="analysis-container"
+    style="max-width: 1600px; margin: 0 auto; padding: {{ '0' if embed_mode else '20px' }};">
+
+    <!-- HEADER / SEARCH SECTION (Hidden if Embedded) -->
+    {% if not embed_mode %}
+    <div class="page-header"
+        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <div>
+            <h2 style="margin: 0; font-size: 24px;">🧬 Fundamental Analysis</h2>
+            <div style="font-size: 14px; color: var(--secondary-color);">Professional Grade Techno-Funda Scoring</div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button onclick="document.getElementById('infoModal').showModal()" class="btn-ghost">
+                <span style="font-size: 1.2em;">ℹ️</span> Scoring Logic
+            </button>
+            <button onclick="document.getElementById('settingsModal').showModal()" class="btn-ghost">
+                <span style="font-size: 1.2em;">⚙️</span> Settings
+            </button>
+        </div>
+    </div>
+
+    <!-- SEARCH BAR -->
+    <div class="card glass-card" style="padding: 24px; margin-bottom: 30px;">
+        <form method="POST" action="{{ url_for('fundamental_analysis') }}"
+            style="display: flex; align-items: flex-end; gap: 16px; width: 100%;">
+            <div style="flex-grow: 1;">
+                <label for="symbol"
+                    style="display: block; margin-bottom: 8px; font-weight: 600; color: var(--primary-color);">Select
+                    Stock</label>
+                <div style="position: relative;">
+                    <span style="position: absolute; left: 12px; top: 12px; color: var(--primary-color);">🔍</span>
+                    <input type="text" id="symbol" name="symbol" placeholder="e.g. RELIANCE, TCS, INFY" required
+                        value="{{ symbol or '' }}"
+                        style="width: 100%; padding: 10px 10px 10px 40px; font-size: 1.1em; font-weight: 600; text-transform: uppercase;">
+                </div>
+            </div>
+            <button type="submit" class="upload-btn" style="padding: 12px 30px; font-size: 1.1em;">
+                Analyze Stock ➔
+            </button>
+        </form>
+
+        {% if error %}
+        <div class="notification notification-error" style="margin-top: 16px; position: static; animation: none;">
+            ⚠️ {{ error }}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- RESULTS SECTION -->
+    {% if data %}
+
+    <!-- EMBED MODE STYLES OVERRIDE -->
+    {% if embed_mode %}
+    <style>
+        /* Force full height for iframe content */
+        html,
+        body {
+            height: 100% !important;
+            min-height: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow-y: auto !important;
+            background: #f8fafc !important;
+        }
+
+        /* Override base.html container */
+        .container {
+            height: 100% !important;
+            min-height: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
+        /* Fix analysis container */
+        .analysis-container {
+            flex: 1 !important;
+            padding: 20px !important;
+            margin: 0 !important;
+            max-width: none !important;
+        }
+
+        /* Force single column layout */
+        .dashboard-grid {
+            display: block !important;
+            grid-template-columns: none !important;
+            gap: 20px !important;
+            padding-bottom: 50px !important;
+        }
+
+        /* Compact header in drawer */
+        .left-panel {
+            position: static !important;
+            width: 100% !important;
+            margin-bottom: 24px !important;
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            flex-wrap: wrap !important;
+            gap: 15px !important;
+        }
+
+        .left-panel .card {
+            width: auto !important;
+            flex: 0 0 auto !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            padding: 12px 16px !important;
+            text-align: left !important;
+            gap: 12px !important;
+            box-shadow: none !important;
+            border: 1px solid #e2e8f0 !important;
+            margin: 0 !important;
+        }
+
+        .circular-chart {
+            width: 60px !important;
+            height: 60px !important;
+        }
+    </style>
+    {% endif %}
+
+    <!-- STRICT MASTER PROMPT LAYOUT: FIXED LEFT, SCROLLABLE RIGHT -->
+    <div class="dashboard-grid" style="
+        display: {{ 'block' if embed_mode else 'grid' }}; 
+        grid-template-columns: 350px 1fr; 
+        gap: 24px; 
+        align-items: start; 
+        max-width: 1440px; 
+        margin: 0 auto;
+    ">
+
+        <!-- LEFT PANEL: FIXED PROFILE & SCORE -->
+        <div class="left-panel" style="
+            position: {{ 'static' if embed_mode else 'sticky' }}; 
+            top: 80px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 1.5em;
+            height: fit-content;
+            margin-bottom: {{ '20px' if embed_mode else '0' }};
+        ">
+
+            <!-- Score Donut -->
+            <div class="card glass-card"
+                style="text-align: center; padding: 2em 1.5em; background: white; border-radius: 8px; border: 1px solid #eee;">
+                <h2 style="margin:0; font-size: 1.8em;">{{ data.name }}</h2>
+                <div style="color: var(--secondary-color); margin-bottom: 1em;">{{ data.symbol }} | {{ data.sector }}
+                </div>
+
+                <div style="position: relative; display: inline-block;">
+                    <svg viewBox="0 0 36 36" class="circular-chart"
+                        style="width: 160px; height: 160px; transform: rotate(-90deg);">
+                        <path class="circle-bg"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                            fill="none" stroke="#eee" stroke-width="2.5" />
+                        <path class="circle" stroke-dasharray="{{ data.health_score }}, 100"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                            fill="none" stroke="{{ score_color(data.health_score) }}" stroke-width="2.5" />
+                    </svg>
+                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                        <div style="font-size: 3em; font-weight: 800; color: var(--text-color); line-height: 1;">{{
+                            data.health_score|int }}</div>
+                    </div>
+                </div>
+                <div
+                    style="margin-top: 1em; font-weight: 700; color: {{ score_color(data.health_score) }}; font-size: 1.2em;">
+                    {{ data.grade }}
+                </div>
+            </div>
+
+            <!-- Key Stats (Dense) -->
+            <div class="card glass-card"
+                style="padding: 1.5em; background: white; border-radius: 8px; border: 1px solid #eee;">
+                <h4 style="margin-top:0; border-bottom: 1px solid #eee; padding-bottom: 0.5em;">Key Stats
+                </h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1em; font-size: 0.9em;">
+                    <div>
+                        <div style="color: var(--secondary-color);">Price</div>
+                        <div style="font-weight: 600;">{{ "%.2f"|format(data.current_price) }}</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--secondary-color);">Mkt Cap</div>
+                        <div style="font-weight: 600;">{{ "%.0f"|format(data.market_cap / 10000000) }} Cr</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--secondary-color);">P/E</div>
+                        <div style="font-weight: 600;">{{ "%.1f"|format(data.pe_ratio) if data.pe_ratio else '-' }}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="color: var(--secondary-color);">ROE</div>
+                        <div style="font-weight: 600;">{{ "%.1f"|format(data.roe*100) }}%</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--secondary-color);">PEG</div>
+                        <div style="font-weight: 600;">{{ "%.2f"|format(data.peg_ratio) }}</div>
+                    </div>
+                    <div>
+                        <div style="color: var(--secondary-color);">Debt/Eq</div>
+                        <div style="font-weight: 600;">{{ "%.2f"|format(data.debt_to_equity) if data.debt_to_equity else
+                            '0.00' }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Score Trend Chart -->
+            {% if history %}
+            <div class="card glass-card" style="margin-top: 20px; padding: 16px; border-radius: 8px;">
+                <h4 style="margin: 0 0 12px 0; font-size: 14px; color: #666;">📈 Scoring Trend (Last 30 Runs)</h4>
+                <div style="height: 150px;">
+                    <canvas id="scoreChart"></canvas>
+                </div>
+            </div>
+
+            <script>
+                document.addEventListener("DOMContentLoaded", function () {
+                    const historyData = {{ history | tojson
+                }};
+                if (historyData.length > 0) {
+                    const ctx = document.getElementById('scoreChart').getContext('2d');
+                    const dates = historyData.map(d => d.calc_date);
+                    const scores = historyData.map(d => d.overall_score);
+
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: dates,
+                            datasets: [{
+                                label: 'Health Score',
+                                data: scores,
+                                borderColor: '#00c853',
+                                backgroundColor: 'rgba(0, 200, 83, 0.1)',
+                                borderWidth: 2,
+                                tension: 0.3,
+                                fill: true,
+                                pointRadius: 3
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    intersect: false,
+                                    mode: 'index',
+                                }
+                            },
+                            scales: {
+                                x: { display: false },
+                                y: {
+                                    min: 0,
+                                    max: 100,
+                                    display: true,
+                                    grid: { display: false }
+                                }
+                            }
+                        }
+                    });
+                }
+            });
+            </script>
+            {% endif %}
+
+            <!-- Pillar Radar (Visual Summary) -->
+            <div class="card glass-card"
+                style="padding: 1.5em; background: white; border-radius: 8px; border: 1px solid #eee;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 0.9em;">
+                    <span>Growth</span> <b>{{ data.pillar_scores.Growth }}/30</b>
+                </div>
+                <div class="progress-bar">
+                    <div style="width: {{ (data.pillar_scores.Growth/30)*100 }}%; background: #9b59b6;"></div>
+                </div>
+
+                <div
+                    style="display: flex; justify-content: space-between; margin-bottom: 5px; margin-top: 10px; font-size: 0.9em;">
+                    <span>Quality</span> <b>{{ data.pillar_scores.Profitability }}/25</b>
+                </div>
+                <div class="progress-bar">
+                    <div style="width: {{ (data.pillar_scores.Profitability/25)*100 }}%; background: #27ae60;"></div>
+                </div>
+
+                <div
+                    style="display: flex; justify-content: space-between; margin-bottom: 5px; margin-top: 10px; font-size: 0.9em;">
+                    <span>Value</span> <b>{{ data.pillar_scores.Valuation }}/20</b>
+                </div>
+                <div class="progress-bar">
+                    <div style="width: {{ (data.pillar_scores.Valuation/20)*100 }}%; background: #3498db;"></div>
+                </div>
+
+                <div
+                    style="display: flex; justify-content: space-between; margin-bottom: 5px; margin-top: 10px; font-size: 0.9em;">
+                    <span>Technical</span> <b>{{ data.pillar_scores.Technicals }}/25</b>
+                </div>
+                <div class="progress-bar">
+                    <div style="width: {{ (data.pillar_scores.Technicals/25)*100 }}%; background: #e74c3c;"></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- RIGHT PANEL: SCROLLABLE DETAILS -->
+        <div class="right-panel" style="display: flex; flex-direction: column; gap: 1.5em;">
+
+            <div class="card glass-card"
+                style="padding: 1.5em; background: white; border-radius: 8px; border: 1px solid #eee;">
+                <h3 style="margin-top:0;">About Company</h3>
+                <div class="description-container">
+                    <p id="company-desc" class="description-text">{{ data.description }}</p>
+                    <div class="read-more-overlay"></div>
+                </div>
+                <button onclick="toggleDescription()" id="read-more-btn"
+                    style="background: none; border: none; color: #333; font-weight: 600; cursor: pointer; padding: 0; margin-top: 8px;">Read
+                    More</button>
+            </div>
+
+            <!-- MACRO FOR SECTIONS -->
+            {% macro detail_section(title, score, max_score, items, color, open=True) %}
+            <details class="card glass-card" {{ 'open' if open else '' }}
+                style="padding: 0; overflow: hidden; margin-bottom: 1em; background: white; border-radius: 8px; border: 1px solid #eee;">
+                <summary style="
+                padding: 1.2em; 
+                background: linear-gradient(90deg, {{ color }}15, transparent); 
+                cursor: pointer; 
+                display: flex; 
+                justify-content: space-between; 
+                align-items: center;
+                list-style: none;
+            ">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 1.2em; color: {{ color }}1; font-weight: bold;">{{ title }}</span>
+                    </div>
+                    <div style="font-weight: 800; font-size: 1.2em; color: {{ color }};">
+                        {{ score }} <span style="font-size: 0.6em; opacity: 0.7;">/ {{ max_score }}</span>
+                    </div>
+                </summary>
+
+                <div class="section-content" style="padding: 0;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                        <thead style="background: rgba(0,0,0,0.02); color: var(--secondary-color);">
+                            <tr>
+                                <th style="padding: 12px 20px; text-align: left;">Metric</th>
+                                <th style="padding: 12px 20px; text-align: left;">Value</th>
+                                <th style="padding: 12px 20px; text-align: left;">Range Map</th>
+                                <th style="padding: 12px 20px; text-align: right;">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if items %}
+                            {% for item in items %}
+                            <tr style="border-bottom: 1px solid #eee;">
+                                <td style="padding: 12px 20px; font-weight: 500;">
+                                    {{ item.metric }}
+                                    <div class="tooltip-wrapper">
+                                        ⓘ
+                                        <div class="tooltip-content">{{ item.tooltip }}</div>
+                                    </div>
+                                </td>
+                                <td
+                                    style="padding: 12px 20px; font-variant-numeric: tabular-nums; font-family: inherit; font-weight: 500;">
+                                    {{ item.value }}</td>
+                                <td style="padding: 12px 20px; color: var(--secondary-color);">{{ item.range }}</td>
+                                <td style="padding: 12px 20px; text-align: right;">
+                                    <span class="badge {{ 'badge-green' if item.good else 'badge-red' }}">
+                                        {{ item.score }}
+                                    </span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td colspan="4" style="padding: 20px; text-align: center;">No Data Available</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+            {% endmacro %}
+
+            {{ detail_section('🚀 Growth Pillar', data.pillar_scores.Growth, 30, data.score_breakdown.Growth, '#9b59b6')
+            }}
+            {{ detail_section('💎 Quality Pillar', data.pillar_scores.Profitability, 25,
+            data.score_breakdown.Profitability,
+            '#27ae60') }}
+            {{ detail_section('🏷️ Value Pillar', data.pillar_scores.Valuation, 20, data.score_breakdown.Valuation,
+            '#3498db') }}
+            {{ detail_section('📈 Technical Pillar', data.pillar_scores.Technicals, 25, data.score_breakdown.Technicals,
+            '#e74c3c') }}
+
+        </div>
+
+    </div>
+    {% endif %}
+
+    <!-- INFO MODAL (Improved) -->
+    <dialog id="infoModal"
+        style="border: none; border-radius: 12px; padding: 0; max-width: 600px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); font-family: inherit;">
+        <div
+            style="padding: 24px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #fafafa;">
+            <div>
+                <h3 style="margin: 0; font-size: 20px;">🐢 Scoring Methodology</h3>
+                <p style="margin: 4px 0 0; color: #666; font-size: 13px;">The Turtle Wealth 4-Pillar Model</p>
+            </div>
+            <button onclick="document.getElementById('infoModal').close()"
+                style="background:none; border:none; cursor:pointer; font-size: 1.5em; color: #999;">✕</button>
+        </div>
+        <div style="padding: 24px; overflow-y: auto; max-height: 60vh;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div style="background: #fdfdfd; padding: 16px; border-radius: 8px; border: 1px solid #eee;">
+                    <h4 style="margin: 0 0 8px 0; color: #9b59b6;">🚀 Growth (30%)</h4>
+                    <p style="font-size: 13px; color: #555; margin: 0;">Evaluates top-line and bottom-line expansion.
+                        Focuses on Revenue CAGR, EPS Growth reliability, and consistency.</p>
+                </div>
+                <div style="background: #fdfdfd; padding: 16px; border-radius: 8px; border: 1px solid #eee;">
+                    <h4 style="margin: 0 0 8px 0; color: #27ae60;">💎 Quality (25%)</h4>
+                    <p style="font-size: 13px; color: #555; margin: 0;">Assesses business efficiency and risk. Key
+                        metrics
+                        include ROE, Margins, and Solvency (Debt/Equity).</p>
+                </div>
+                <div style="background: #fdfdfd; padding: 16px; border-radius: 8px; border: 1px solid #eee;">
+                    <h4 style="margin: 0 0 8px 0; color: #3498db;">🏷️ Value (20%)</h4>
+                    <p style="font-size: 13px; color: #555; margin: 0;">Determines if the stock is priced attractively.
+                        Look
+                        for low PEG ratios and favorable sector ranking.</p>
+                </div>
+                <div style="background: #fdfdfd; padding: 16px; border-radius: 8px; border: 1px solid #eee;">
+                    <h4 style="margin: 0 0 8px 0; color: #e74c3c;">📈 Technicals (25%)</h4>
+                    <p style="font-size: 13px; color: #555; margin: 0;">Timing factor. Favors stocks in long-term
+                        uptrends
+                        (>200DMA) with strong relative momentum.</p>
+                </div>
+            </div>
+            <div
+                style="margin-top: 20px; padding: 12px; background: #fffbe6; border-radius: 6px; font-size: 13px; color: #856404; border: 1px solid #ffeeba;">
+                <strong>Note:</strong> Scores are recalculated daily based on EOD market data.
+            </div>
+
+            <div
+                style="margin-top: 10px; padding: 12px; background: #e3f2fd; border-radius: 6px; font-size: 13px; color: #0d47a1; border: 1px solid #bbdefb;">
+                <strong>⚠️ Disclaimer:</strong> Scores ≠ Buy/Sell Signals. This system evaluates long-term
+                <strong>Business
+                    Health</strong>, not short-term price action. High scores indicate quality, but valuation must be
+                considered separately.
+            </div>
+        </div>
+    </dialog>
+
+    <!-- SETTINGS MODAL (Detailed) -->
+    <dialog id="settingsModal"
+        style="border: none; border-radius: 12px; padding: 0; width: 600px; max-width: 90vw; box-shadow: 0 10px 25px rgba(0,0,0,0.15); font-family: inherit;">
+        <div
+            style="padding: 20px 24px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #fafafa;">
+            <div>
+                <h3 style="margin: 0; font-size: 20px;">⚙️ Custom Weightages</h3>
+                <p style="margin: 4px 0 0; color: #666; font-size: 13px;">Adjust factor sensitivity (Scenario Analysis)
+                </p>
+            </div>
+            <button onclick="document.getElementById('settingsModal').close()"
+                style="background:none; border:none; cursor:pointer; font-size: 1.5em; color: #999;">✕</button>
+        </div>
+
+        <div style="padding: 0 24px 20px 24px; max-height: 70vh; overflow-y: auto;">
+            <form action="{{ url_for('fundamental_analysis') }}" method="post" id="weightsForm">
+                <!-- Hidden Symbol -->
+                <input type="hidden" name="symbol" value="{{ symbol }}">
+
+                <div class="row g-3 mt-1">
+                    <!-- LEFT COLUMN: PILLAR WEIGHTS -->
+                    <div class="col-md-5 border-end">
+                        <h6 class="text-primary mb-3"
+                            style="font-weight: 600; font-size: 14px; text-transform: uppercase;">
+                            <i class="fas fa-layer-group me-1"></i> Pillar Weights
+                        </h6>
+                        <div class="mb-2">
+                            <label class="form-label text-sm fw-bold">Growth (%)</label>
+                            <input type="number" class="form-control form-control-sm" name="w_growth"
+                                value="{{ weights.get('Growth', 30) if weights else 30 }}" min="0" max="100">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label text-sm fw-bold">Profitability (%)</label>
+                            <input type="number" class="form-control form-control-sm" name="w_quality"
+                                value="{{ weights.get('Profitability', 25) if weights else 25 }}" min="0" max="100">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label text-sm fw-bold">Valuation (%)</label>
+                            <input type="number" class="form-control form-control-sm" name="w_value"
+                                value="{{ weights.get('Valuation', 20) if weights else 20 }}" min="0" max="100">
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label text-sm fw-bold">Technicals (%)</label>
+                            <input type="number" class="form-control form-control-sm" name="w_tech"
+                                value="{{ weights.get('Technicals', 25) if weights else 25 }}" min="0" max="100">
+                        </div>
+                        <div class="alert alert-light border mt-3 p-2 text-xs text-muted"
+                            style="font-size: 12px; line-height: 1.4;">
+                            <i class="fas fa-info-circle me-1"></i> <strong>Pillar weights</strong> calculate the final
+                            Health Score. <br>
+                            <strong>Factor weights</strong> determine points <em>within</em> each Pillar.
+                        </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN: FACTOR WEIGHTS -->
+                    <div class="col-md-7 ps-4">
+                        <h6 class="text-info mb-3"
+                            style="font-weight: 600; font-size: 14px; text-transform: uppercase;">
+                            <i class="fas fa-sliders-h me-1"></i> Factor Weights (Pts)
+                        </h6>
+
+                        <!-- Accordion for Factors -->
+                        <div class="accordion accordion-flush" id="accordionFactors">
+
+                            <!-- Growth Factors -->
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button
+                                        class="accordion-button collapsed py-2 text-sm fw-bold text-success bg-light"
+                                        type="button" data-bs-toggle="collapse" data-bs-target="#flush-growth">
+                                        🚀 Growth Factors
+                                    </button>
+                                </h2>
+                                <div id="flush-growth" class="accordion-collapse collapse"
+                                    data-bs-parent="#accordionFactors">
+                                    <div class="accordion-body p-2 bg-white">
+                                        <div class="row g-2">
+                                            <div class="col-6"><label class="text-xs text-muted">Rev CAGR</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_g_rev"
+                                                    value="{{ weights.get('G_Rev', 35) if weights else 35 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">EPS
+                                                    Growth</label><input type="number"
+                                                    class="form-control form-control-sm" name="w_g_eps"
+                                                    value="{{ weights.get('G_EPS', 35) if weights else 35 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">OCF
+                                                    Growth</label><input type="number"
+                                                    class="form-control form-control-sm" name="w_g_ocf"
+                                                    value="{{ weights.get('G_OCF', 20) if weights else 20 }}"></div>
+                                            <div class="col-6"><label
+                                                    class="text-xs text-muted">Consistency</label><input type="number"
+                                                    class="form-control form-control-sm" name="w_g_cons"
+                                                    value="{{ weights.get('G_Cons', 10) if weights else 10 }}"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Quality Factors -->
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button
+                                        class="accordion-button collapsed py-2 text-sm fw-bold text-success bg-light"
+                                        type="button" data-bs-toggle="collapse" data-bs-target="#flush-quality">
+                                        💎 Quality Factors
+                                    </button>
+                                </h2>
+                                <div id="flush-quality" class="accordion-collapse collapse"
+                                    data-bs-parent="#accordionFactors">
+                                    <div class="accordion-body p-2 bg-white">
+                                        <div class="row g-2">
+                                            <div class="col-4"><label class="text-xs text-muted">ROE</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_q_roe"
+                                                    value="{{ weights.get('Q_ROE', 30) if weights else 30 }}"></div>
+                                            <div class="col-4"><label class="text-xs text-muted">Margins</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_q_mar"
+                                                    value="{{ weights.get('Q_Mar', 20) if weights else 20 }}"></div>
+                                            <div class="col-4"><label class="text-xs text-muted">Lev (D/E)</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_q_deb"
+                                                    value="{{ weights.get('Q_Deb', 20) if weights else 20 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">Stability</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_q_sta"
+                                                    value="{{ weights.get('Q_Sta', 15) if weights else 15 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">Cash Conv</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_q_cas"
+                                                    value="{{ weights.get('Q_Cas', 15) if weights else 15 }}"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Value Factors -->
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button
+                                        class="accordion-button collapsed py-2 text-sm fw-bold text-success bg-light"
+                                        type="button" data-bs-toggle="collapse" data-bs-target="#flush-value">
+                                        🏷️ Value Factors
+                                    </button>
+                                </h2>
+                                <div id="flush-value" class="accordion-collapse collapse"
+                                    data-bs-parent="#accordionFactors">
+                                    <div class="accordion-body p-2 bg-white">
+                                        <div class="row g-2">
+                                            <div class="col-6"><label class="text-xs text-muted">PEG Ratio</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_v_peg"
+                                                    value="{{ weights.get('V_PEG', 15) if weights else 15 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">Sector PE</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_v_per"
+                                                    value="{{ weights.get('V_PER', 30) if weights else 30 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">Sector EV</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_v_ev"
+                                                    value="{{ weights.get('V_EV', 20) if weights else 20 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">Sector
+                                                    P/B</label><input type="number" class="form-control form-control-sm"
+                                                    name="w_v_pb"
+                                                    value="{{ weights.get('V_PB', 10) if weights else 10 }}"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Technical Factors -->
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button
+                                        class="accordion-button collapsed py-2 text-sm fw-bold text-success bg-light"
+                                        type="button" data-bs-toggle="collapse" data-bs-target="#flush-tech">
+                                        📈 Technical Factors
+                                    </button>
+                                </h2>
+                                <div id="flush-tech" class="accordion-collapse collapse"
+                                    data-bs-parent="#accordionFactors">
+                                    <div class="accordion-body p-2 bg-white">
+                                        <div class="row g-2">
+                                            <div class="col-6"><label class="text-xs text-muted">Trend</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_t_tre"
+                                                    value="{{ weights.get('T_Tre', 35) if weights else 35 }}"></div>
+                                            <div class="col-6"><label class="text-xs text-muted">Momentum</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_t_mom"
+                                                    value="{{ weights.get('T_Mom', 30) if weights else 30 }}"></div>
+                                            <div class="col-4"><label class="text-xs text-muted">RSI</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_t_rsi"
+                                                    value="{{ weights.get('T_RSI', 15) if weights else 15 }}"></div>
+                                            <div class="col-4"><label class="text-xs text-muted">Drawdown</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_t_dra"
+                                                    value="{{ weights.get('T_Dra', 10) if weights else 10 }}"></div>
+                                            <div class="col-4"><label class="text-xs text-muted">Exit Risk</label><input
+                                                    type="number" class="form-control form-control-sm" name="w_t_exi"
+                                                    value="{{ weights.get('T_Exi', 10) if weights else 10 }}"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer px-0 pb-0 mt-3 border-top pt-3">
+                    <button type="button" class="btn btn-secondary text-sm" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary text-sm shadow-sm" form="weightsForm">Recalculate
+                        Score</button>
+                </div>
+            </form>
+        </div>
+    </dialog>
+
+    <script>
+        function toggleDescription() {
+            var desc = document.getElementById('company-desc');
+            var btn = document.getElementById('read-more-btn');
+            var container = document.querySelector('.description-container');
+
+            container.classList.toggle('expanded');
+
+            if (container.classList.contains('expanded')) {
+                btn.innerHTML = "Read Less";
+            } else {
+                btn.innerHTML = "Read More";
+            }
+        }
+    </script>
+
+    <style>
+        .progress-bar {
+            background: rgba(0, 0, 0, 0.05);
+            height: 6px;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.85em;
+        }
+
+        .badge-green {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .badge-red {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        details>summary {
+            list-style: none;
+            outline: none;
+        }
+
+        details>summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .circular-chart {
+            display: block;
+            margin: 0 auto;
+            max-width: 80%;
+            max-height: 250px;
+        }
+
+        .circle-bg {
+            fill: none;
+            stroke: #eee;
+            stroke-width: 3.8;
+        }
+
+        .circle {
+            fill: none;
+            stroke-width: 2.8;
+            stroke-linecap: round;
+            animation: progress 1s ease-out forwards;
+        }
+
+        @keyframes progress {
+            0% {
+                stroke-dasharray: 0 100;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr !important;
+            }
+
+            .left-panel {
+                position: static !important;
+            }
+        }
+
+        .btn-ghost {
+            background: transparent;
+            border: 1px solid transparent;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #555;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-ghost:hover {
+            background: rgba(0, 0, 0, 0.05);
+            color: #111;
+            border-color: #ddd;
+        }
+
+        .btn-outline {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #333;
+        }
+
+        dialog::backdrop {
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(2px);
+        }
+
+        /* Description Read More */
+        .description-container {
+            position: relative;
+            max-height: 100px;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .description-container.expanded {
+            max-height: 1000px;
+        }
+
+        .read-more-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 40px;
+            background: linear-gradient(to bottom, transparent, white);
+            pointer-events: none;
+        }
+
+        .description-container.expanded .read-more-overlay {
+            display: none;
+        }
+
+        .settings-section {
+            margin-bottom: 24px;
+            margin-top: 16px;
+        }
+
+        .input-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #555;
+        }
+
+        .input-row input {
+            width: 60px;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        /* Custom Tooltip */
+        .tooltip-wrapper {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+            margin-left: 4px;
+            color: #999;
+        }
+
+        .tooltip-wrapper:hover {
+            color: #555;
+        }
+
+        .tooltip-content {
+            visibility: hidden;
+            opacity: 0;
+            width: 240px;
+            background-color: #333;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 10px;
+            position: absolute;
+            z-index: 100;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -120px;
+            transition: opacity 0.2s, visibility 0.2s;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+            font-size: 12px;
+            line-height: 1.4;
+            font-weight: normal;
+            pointer-events: none;
+        }
+
+        .tooltip-content::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #333 transparent transparent transparent;
+        }
+
+        .tooltip-wrapper:hover .tooltip-content {
+            visibility: visible;
+            opacity: 1;
+        }
+    </style>
+</div>
+{% endblock %}

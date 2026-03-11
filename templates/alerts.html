@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Price Alerts - ATH Tracker{% endblock %}
+
+{% block content %}
+<div class="page-title">
+    <h2>🔔 Price Alerts</h2>
+    <div style="font-size: 0.9em; color: var(--secondary-color);">
+        Set targets and get notified when stocks hit your price.
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <!-- CREATE ALERT FORM -->
+    <div class="card glass-card stagger-fade-in delay-1">
+        <h3>Create New Alert</h3>
+        <form action="{{ url_for('alerts') }}" method="post"
+            style="display: flex; flex-direction: column; gap: 1em; margin-top: 1em;">
+            <div>
+                <label
+                    style="display: block; margin-bottom: 0.5em; font-size: 0.9em; color: var(--secondary-color);">Stock
+                    Symbol</label>
+                <input type="text" name="symbol" placeholder="e.g. RELIANCE" required
+                    style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.5);">
+            </div>
+
+            <div style="display: flex; gap: 10px;">
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; margin-bottom: 0.5em; font-size: 0.9em; color: var(--secondary-color);">Condition</label>
+                    <select name="condition"
+                        style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.5);">
+                        <option value="ABOVE">Goes Above (Wait for breakout)</option>
+                        <option value="BELOW">Goes Below (Buy the dip)</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label
+                        style="display: block; margin-bottom: 0.5em; font-size: 0.9em; color: var(--secondary-color);">Target
+                        Price (₹)</label>
+                    <input type="number" step="0.05" name="target_price" placeholder="2500.00" required
+                        style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--glass-border); background: rgba(255,255,255,0.5);">
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn" style="margin-top: 0.5em;">Set Alert</button>
+        </form>
+    </div>
+
+    <!-- ACTIVE ALERTS LIST -->
+    <div class="card glass-card stagger-fade-in delay-2" style="grid-column: span 2;">
+        <h3>Active Alerts</h3>
+
+        {% if triggered_alerts %}
+        <div
+            style="margin-bottom: 1.5em; padding: 1em; background: rgba(var(--warning-rgb), 0.1); border-left: 4px solid var(--warning-color); border-radius: 4px;">
+            <strong style="color: var(--warning-color);">Triggered Now:</strong>
+            <ul style="margin: 0.5em 0 0 1.5em; color: var(--text-color);">
+                {% for t in triggered_alerts %}
+                <li>{{ t.message }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <table class="styled-table">
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Condition</th>
+                    <th>Target</th>
+                    <th>Created</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for alert in alerts %}
+                <tr>
+                    <td style="font-weight: 600;">{{ alert.symbol }}</td>
+                    <td>
+                        <span class="badge {{ 'success' if alert.condition == 'ABOVE' else 'danger' }}">
+                            {{ alert.condition }}
+                        </span>
+                    </td>
+                    <td>₹{{ "{:,.2f}".format(alert.target_price) }}</td>
+                    <td style="font-size: 0.9em; color: var(--secondary-color);">{{ alert.created_at[:10] }}</td>
+                    <td>
+                        <form action="{{ url_for('delete_alert_route', alert_id=alert.id) }}" method="post"
+                            onsubmit="return confirm('Delete this alert?');">
+                            <button type="submit"
+                                style="background: none; border: none; color: var(--danger-color); cursor: pointer; opacity: 0.7;">
+                                ✕ Delete
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" style="text-align: center; color: var(--secondary-color);">No active alerts.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    .badge {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.8em;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+
+    .badge.success {
+        background: rgba(var(--success-rgb), 0.1);
+        color: var(--success-color);
+    }
+
+    .badge.danger {
+        background: rgba(var(--danger-rgb), 0.1);
+        color: var(--danger-color);
+    }
+</style>
+{% endblock %}

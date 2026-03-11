@@ -1,0 +1,414 @@
+{% extends "base.html" %}
+
+{% block title %}My Portfolios - ATH Tracker{% endblock %}
+
+{% block content %}
+<style>
+.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 20px;
+}
+
+.sortable:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.sort-icon {
+    position: absolute;
+    right: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: #666;
+}
+
+.active-sort .sort-icon {
+    color: var(--primary-color);
+    font-weight: bold;
+}
+
+.upload-btn {
+    background-color: var(--primary-color) !important;
+    color: white !important;
+    border-color: var(--primary-color) !important;
+}
+
+.upload-btn:hover {
+    background-color: var(--primary-color) !important;
+    color: white !important;
+    border-color: var(--primary-color) !important;
+}
+</style>
+
+    <div class="page-actions">
+        <h2>My Portfolios</h2>
+        <form action="{{ url_for('create_portfolio') }}" method="post" class="search-form" style="padding:0; box-shadow:none; margin:0;">
+            <input type="text" name="portfolio_name" placeholder="Enter New Portfolio Name..." required>
+            <button type="submit" class="submit-btn" style="margin-top: 0;">+ Add Portfolio</button>
+        </form>
+    </div>
+
+    <div class="tab-nav">
+        {% for p in portfolios %}
+            <a href="#" data-tab="portfolio-{{ p.id }}" class="{{ 'active' if active_tab_id == 'portfolio-' + p.id|string or (loop.first and not active_tab_id) else '' }}">{{ p.name }}</a>
+        {% endfor %}
+        <a href="#" data-tab="checklist" class="{{ 'active' if active_tab_id == 'checklist' else '' }}">Fundamental Checklist</a>
+    </div>
+
+    {% for portfolio in portfolios %}
+    <div id="portfolio-{{ portfolio.id }}" class="tab-content {{ 'active' if active_tab_id == 'portfolio-' + portfolio.id|string or (loop.first and not active_tab_id) else '' }}">
+        <div class="page-actions" style="border-bottom: none; padding-bottom: 0; margin-bottom: 1em; display: flex; align-items: center; gap: 1em;">
+            <h3 style="border-bottom: none;">{{ portfolio.name }} ({{ portfolio.holdings|length }} stocks)</h3>
+            <div class="backup-controls">
+                <a href="{{ url_for('download_portfolio', portfolio_id=portfolio.id) }}" class="edit-btn">Download</a>
+                <form action="{{ url_for('upload_portfolio', portfolio_id=portfolio.id) }}" method="post" enctype="multipart/form-data" style="display: inline;">
+                    <input type="file" name="excel_file" accept=".xlsx,.xls" style="display: none;" id="upload-file-{{ portfolio.id }}" onchange="this.form.submit()">
+                    <button type="button" class="edit-btn upload-btn" style="background-color: var(--primary-color) !important; color: white !important; border-color: var(--primary-color) !important;" onclick="document.getElementById('upload-file-{{ portfolio.id }}').click()">Upload</button>
+                </form>
+                <a href="{{ url_for('rename_portfolio', portfolio_id=portfolio.id) }}" class="edit-btn">Rename</a>
+                <form action="{{ url_for('delete_portfolio', portfolio_id=portfolio.id) }}" method="post" onsubmit="return confirm('Are you sure you want to permanently delete this entire portfolio?');" style="all:initial;">
+                    <button type="submit" class="delete-btn">Delete Portfolio</button>
+                </form>
+            </div>
+        </div>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="sortable" data-sort="symbol">Symbol <span class="sort-icon">↕</span></th>
+                        <th>CMP (₹)</th>
+                        <th>Exit Price (₹)</th>
+                        <th class="sortable" data-sort="from_exit">% from Exit <span class="sort-icon">↕</span></th>
+                        <th class="sortable" data-sort="allocation">Allocation % <span class="sort-icon">↕</span></th>
+                        <th class="sortable" data-sort="change_pct">Daily Change <span class="sort-icon">↕</span></th>
+                        <th class="sortable" data-sort="contribution">% Contribution <span class="sort-icon">↕</span></th>
+                        <th>R/G</th>
+                        <th>Result Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for holding in portfolio.holdings %}
+                    <tr>
+                        <td><b>{{ holding.symbol }}</b></td>
+                        <td>{{ holding.cmp }}</td>
+                        <td>{{ holding.exit_price }}</td>
+                        <td data-value="{{ holding.from_exit }}">{{ holding.from_exit }}%</td>
+                        <td data-value="{{ holding.allocation }}">{{ holding.allocation }}%</td>
+                        <td data-value="{{ holding.change_pct }}" style="color: {{ 'var(--success-color)' if holding.change_pct > 0 else 'var(--danger-color)' }}">{{ holding.change_pct }}</td>
+                        <td data-value="{{ holding.contribution }}">{{ holding.contribution }}%</td>
+                        <td>{{ holding.rg_status }}</td>
+                        <td>{{ holding.result_date }}</td>
+                        <td class="actions-cell">
+                            <a href="{{ url_for('edit_holding', holding_id=holding.id) }}" class="edit-btn">Edit</a>
+                            <form action="{{ url_for('delete_holding', holding_id=holding.id) }}" method="post" onsubmit="return confirm('Are you sure?');" style="all:initial;">
+                                <button type="submit" class="delete-btn" style="padding: 5px 8px; font-size: 10px;">Del</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="10" style="text-align: center;">This portfolio is empty. Add a holding below.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Portfolio Allocation Chart -->
+        {% if portfolio.allocation_data %}
+        <div class="card" style="margin-top: 1.5em; padding: 1.5em;">
+            <h4 style="margin-bottom: 1em; color: var(--primary-color);">Allocation by Stock</h4>
+            <div style="display: flex; gap: 2em; align-items: flex-start; flex-wrap: wrap;">
+                <div style="max-width: 300px; min-width: 220px; flex: 0 0 300px;">
+                    <canvas id="allocation-chart-{{ portfolio.id }}" width="300" height="300"></canvas>
+                </div>
+                <div style="flex: 1; min-width: 220px;">
+                    <h5 style="margin-bottom: 0.8em; color: var(--secondary-color);">Portfolio Breakdown</h5>
+                    <div style="font-size: 0.9em; line-height: 1.6; display: flex; flex-wrap: wrap; gap: 0.5em 2em;">
+                        {% set n = portfolio.allocation_data.labels|length %}
+                        {% set per_col = 8 %}
+                        {% set num_cols = (n // per_col) + (1 if n % per_col > 0 else 0) %}
+                        {% for col in range(num_cols) %}
+                        <div style="flex: 1 1 180px; min-width: 160px;">
+                            {% for i in range(col*per_col, (col+1)*per_col) if i < n %}
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 0.3em; align-items: center;">
+                                <span style="display: flex; align-items: center;">
+                                    <span style="display: inline-block; width: 12px; height: 12px; background-color: {{ portfolio.allocation_data.background_colors[i] }}; border-radius: 2px; margin-right: 8px;"></span>
+                                    <strong>{{ portfolio.allocation_data.labels[i] }}</strong>
+                                </span>
+                                <span>{{ "%.1f"|format(portfolio.allocation_data.data[i]) }}%</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <hr style="margin: 1em 0 0.5em 0; border-color: var(--light-grey);">
+                    <div style="display: flex; justify-content: space-between; font-weight: 600; font-size: 1em;">
+                        <span>Total Allocation:</span>
+                        <span>{{ "%.1f"|format(portfolio.allocation_data.total_allocation) }}%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <form action="{{ url_for('add_holding', portfolio_id=portfolio.id) }}" method="post" class="form-grid" style="padding: 0.8em; box-shadow: none; margin-top: 0.8em; border: 1px solid var(--light-grey); border-radius: var(--border-radius);">
+            <div class="autocomplete" style="grid-column: 1 / span 2;">
+                <label for="symbol-{{ portfolio.id }}">Company Ticker</label>
+                <input type="text" id="portfolio-holding-symbol-{{ portfolio.id }}" class="ticker-autocomplete" name="symbol" placeholder="Ticker" required autocomplete="off">
+            </div>
+            <div>
+                <label for="exit_price-{{ portfolio.id }}">Exit Price</label>
+                <input type="number" id="exit_price-{{ portfolio.id }}" step="0.01" name="exit_price" placeholder="Exit Price" required>
+            </div>
+            <div>
+                <label for="allocation-{{ portfolio.id }}">Allocation %</label>
+                <input type="number" id="allocation-{{ portfolio.id }}" step="0.01" name="allocation" placeholder="Allocation %" required>
+            </div>
+            <div>
+                <label for="rg_status-{{ portfolio.id }}">R/G</label>
+                <select id="rg_status-{{ portfolio.id }}" name="rg_status">
+                    <option value="R">R</option>
+                    <option value="G">G</option>
+                </select>
+            </div>
+            <button type="submit" class="submit-btn" style="padding: 8px 12px; margin-top: 0; align-self: end;">Add Holding</button>
+        </form>
+    </div>
+    {% endfor %}
+
+    <div id="checklist" class="tab-content {{ 'active' if active_tab_id == 'checklist' else '' }}">
+        <div class="page-actions" style="border-bottom: none; padding-bottom: 0;">
+            <h3 style="border-bottom: none;">Fundamental Checklist</h3>
+        </div>
+        <div class="table-wrapper" style="margin-top: 1em;">
+            <table>
+                <thead>
+                    <tr><th>Symbol</th><th>Analysis Done?</th><th>Fund</th><th>Breakout?</th><th>FNO Stock? (from Profit Mgr)</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in checklist_items %}
+                    <tr>
+                        <td><b>{{ item.symbol }}</b></td>
+                        <td>{{ 'Yes' if item.analysis_status == 'Y' else 'No' }}</td>
+                        <td>{{ item.fund_allocation or 'N/A' }}</td>
+                        <td>{{ 'Yes' if item.breakout_status == 'Y' else 'No' }}</td>
+                        <td>{{ 'Yes' if item.idx_type == 'FNO' else 'No' }}</td>
+                        <td class="actions-cell">
+                            <a href="{{ url_for('edit_checklist_item', item_id=item.id) }}" class="edit-btn">Edit</a>
+                            <form action="{{ url_for('delete_checklist_item', item_id=item.id) }}" method="post" onsubmit="return confirm('Are you sure?');" style="all:initial;">
+                                <button type="submit" class="delete-btn">Del</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" style="text-align: center;">Your checklist is empty.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div style="background-color: #fff; padding: 1em; border-radius: var(--border-radius); box-shadow: var(--shadow); margin-top: 1em;">
+            <h4>Add Company to Checklist</h4>
+            <form action="{{ url_for('add_to_checklist') }}" method="post" class="form-grid" style="padding:0; box-shadow:none; margin:0; gap: 0.8em;">
+                <div class="autocomplete" style="grid-column: 1 / span 2;">
+                    <label for="checklist-symbol">Company Ticker</label>
+                    <input type="text" id="portfolio-checklist-symbol" class="ticker-autocomplete" name="symbol" placeholder="Enter Ticker..." required>
+                </div>
+                <div>
+                    <label for="analysis_status">Analysis Done?</label>
+                    <select id="analysis_status" name="analysis_status"><option value="N" selected>No</option><option value="Y">Yes</option></select>
+                </div>
+                <div>
+                    <label for="fund_allocation">Fund</label>
+                    <select id="fund_allocation" name="fund_allocation"><option value="" selected>None</option><option value="WM">WM</option><option value="GM">GM</option></select>
+                </div>
+                <div>
+                    <label for="breakout_status">Breakout?</label>
+                    <select id="breakout_status" name="breakout_status"><option value="N" selected>No</option><option value="Y">Yes</option></select>
+                </div>
+                <button type="submit" class="submit-btn" style="margin-top: 0; align-self: end;">Add to Checklist</button>
+            </form>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const tabLinks = document.querySelectorAll('.tab-nav a');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        function activateTab(tabId) {
+            tabLinks.forEach(innerLink => {
+                if(innerLink.getAttribute('data-tab') === tabId) {
+                    innerLink.classList.add('active');
+                } else {
+                    innerLink.classList.remove('active');
+                }
+            });
+            tabContents.forEach(content => {
+                if(content.id === tabId) {
+                    content.classList.add('active');
+                } else {
+                    content.classList.remove('active');
+                }
+            });
+        }
+
+        // Initialize allocation charts for each portfolio
+        let chartInstances = {};
+        function initializeAllocationCharts() {
+            // Portfolio data from backend
+            const portfolioData = {{ portfolios|tojson }};
+            portfolioData.forEach(portfolio => {
+                if (portfolio.allocation_data) {
+                    const chartId = `allocation-chart-${portfolio.id}`;
+                    const ctx = document.getElementById(chartId);
+                    if (ctx) {
+                        // Destroy previous chart instance if exists
+                        if (chartInstances[chartId]) {
+                            chartInstances[chartId].destroy();
+                        }
+                        chartInstances[chartId] = new Chart(ctx, {
+                            type: 'pie',
+                            data: {
+                                labels: portfolio.allocation_data.labels,
+                                datasets: [{
+                                    data: portfolio.allocation_data.data,
+                                    backgroundColor: portfolio.allocation_data.background_colors,
+                                    borderWidth: 2,
+                                    borderColor: '#ffffff'
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: {
+                                        display: false
+                                    },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function(context) {
+                                                return context.label + ': ' + context.parsed + '%';
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        // Always set canvas size
+                        ctx.width = 300;
+                        ctx.height = 300;
+                    }
+                }
+            });
+        }
+
+        // Initialize charts when page loads
+        initializeAllocationCharts();
+
+        // Re-initialize charts when tabs are switched
+        tabLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                const targetId = this.getAttribute('data-tab');
+                if (targetId) {
+                    e.preventDefault();
+                activateTab(targetId);
+                    // Re-initialize charts after tab switch
+                    setTimeout(initializeAllocationCharts, 100);
+                }
+            });
+        });
+
+        // Sorting functionality
+        const sortableColumns = document.querySelectorAll('.sortable');
+        
+        // Track sort state for each table
+        const sortStates = new Map();
+        
+        sortableColumns.forEach(column => {
+            column.addEventListener('click', function() {
+                const sortType = this.getAttribute('data-sort');
+                const table = this.closest('table');
+                const tableId = table.id || 'default';
+                const tbody = table.querySelector('tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                
+                // Initialize sort state for this table if not exists
+                if (!sortStates.has(tableId)) {
+                    sortStates.set(tableId, {});
+                }
+                const tableSortState = sortStates.get(tableId);
+                
+                // Remove active class from all sortable columns in this table
+                table.querySelectorAll('.sortable').forEach(col => {
+                    col.classList.remove('active-sort');
+                    col.querySelector('.sort-icon').textContent = '↕';
+                });
+                
+                // Add active class to the clicked column
+                this.classList.add('active-sort');
+                
+                // Determine sort direction
+                let sortDirection = 'asc';
+                if (tableSortState[sortType] === 'asc') {
+                    sortDirection = 'desc';
+                }
+                
+                // Update sort state
+                tableSortState[sortType] = sortDirection;
+                
+                // Update icon based on sort direction
+                const currentSortIcon = this.querySelector('.sort-icon');
+                currentSortIcon.textContent = sortDirection === 'asc' ? '↑' : '↓';
+                
+                // Sort rows based on the clicked column
+                rows.sort((rowA, rowB) => {
+                    const cellA = rowA.querySelector(`td:nth-child(${getColumnIndex(sortType)})`);
+                    const cellB = rowB.querySelector(`td:nth-child(${getColumnIndex(sortType)})`);
+                    
+                    if (cellA && cellB) {
+                        if (sortType === 'symbol') {
+                            // Text-based sorting for symbols
+                            const valueA = cellA.textContent.trim().toUpperCase();
+                            const valueB = cellB.textContent.trim().toUpperCase();
+                            if (sortDirection === 'asc') {
+                                return valueA.localeCompare(valueB);
+                            } else {
+                                return valueB.localeCompare(valueA);
+                            }
+                        } else {
+                            // Numeric sorting for other columns
+                            const valueA = parseFloat(cellA.getAttribute('data-value') || cellA.textContent.replace(/[^\d.-]/g, ''));
+                            const valueB = parseFloat(cellB.getAttribute('data-value') || cellB.textContent.replace(/[^\d.-]/g, ''));
+                            
+                            if (!isNaN(valueA) && !isNaN(valueB)) {
+                                return sortDirection === 'asc' ? valueA - valueB : valueB - valueA;
+                            }
+                        }
+                    }
+                    return 0;
+                });
+                
+                // Clear and re-append sorted rows
+                tbody.innerHTML = '';
+                rows.forEach(row => tbody.appendChild(row));
+            });
+        });
+        
+        // Helper function to get column index based on sort type
+        function getColumnIndex(sortType) {
+            const columnMap = {
+                'symbol': 1,
+                'from_exit': 4,
+                'allocation': 5,
+                'change_pct': 6,
+                'contribution': 7
+            };
+            return columnMap[sortType] || 1;
+        }
+    });
+</script>
+{% endblock %}

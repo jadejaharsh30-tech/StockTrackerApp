@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}Profit Manager - ATH Tracker{% endblock %}
+
+{% block content %}
+    <h2>Manage Permanent Stock Status</h2>
+    <p style="margin-bottom: 0.8em;">This is your permanent record of core stock attributes. Deleting a stock here will remove it from all records.</p>
+    
+    <div class="card">
+        <form action="{{ url_for('profit_manager') }}" method="get" class="search-form">
+            <input type="text" id="profit-search-symbol" class="ticker-autocomplete" name="search" placeholder="Search Symbol..." value="{{ search_term or '' }}" autocomplete="off">
+            <button type="submit" class="submit-btn" style="padding: 8px 12px; margin-top: 0;">Search</button>
+        </form>
+        <div class="backup-controls" style="display: flex; align-items: center; gap: 1.5em; flex-wrap: wrap;">
+            <!-- Main Upload/Download -->
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <form action="{{ url_for('upload_profits') }}" method="post" enctype="multipart/form-data" style="all:initial; display:flex; gap:8px; align-items:center;">
+                    <input type="file" name="excel_file" required>
+                    <button type="submit" class="edit-btn" style="background-color: var(--primary-color);">Upload</button>
+                </form>
+                <a href="{{ url_for('download_profits') }}" class="edit-btn" style="background-color: var(--success-color);">Download</a>
+            </div>
+            
+            <!-- Visual Separator -->
+            <div style="width: 1px; height: 30px; background-color: #ccc; margin: 0 0.5em;"></div>
+            
+            <!-- Individual Upload Controls -->
+            <div style="display: flex; gap: 1em; align-items: center;">
+                <!-- ATH Profit Upload -->
+                <form action="{{ url_for('upload_ath_profit_preview') }}" method="post" enctype="multipart/form-data" style="display: flex; gap: 8px; align-items: center;">
+                    <input type="file" name="excel_file" required style="width: 200px;">
+                    <button type="submit" class="edit-btn" style="background-color: var(--warning-color); font-size: 0.9em;">ATH Profit</button>
+                </form>
+                
+                <!-- Result Date Upload -->
+                <form action="{{ url_for('upload_result_date_preview') }}" method="post" enctype="multipart/form-data" style="display: flex; gap: 8px; align-items: center;">
+                    <input type="file" name="excel_file" required style="width: 200px;">
+                    <button type="submit" class="edit-btn" style="background-color: var(--info-color); font-size: 0.9em;">Result Date</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Preview Sections -->
+    {% if ath_profit_preview %}
+    <div class="card" style="margin-top: 1em; background-color: #f8f9fa;">
+        <h4>ATH Profit Upload Preview</h4>
+        {% if ath_profit_preview.errors %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--danger-color);">Errors:</h5>
+            <ul style="color: var(--danger-color);">
+                {% for error in ath_profit_preview.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        
+        {% if ath_profit_preview.to_update %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--primary-color);">Will Update ({{ ath_profit_preview.to_update|length }} entries):</h5>
+            <div style="max-height: 200px; overflow-y: auto; background: white; padding: 0.5em; border-radius: 4px;">
+                {% for item in ath_profit_preview.to_update %}
+                <div style="padding: 0.2em 0;">{{ item.symbol }} → ATH Profit: {{ item.old_value }} → {{ item.ath_profit }}</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if ath_profit_preview.to_create %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--success-color);">Will Create ({{ ath_profit_preview.to_create|length }} entries):</h5>
+            <div style="max-height: 200px; overflow-y: auto; background: white; padding: 0.5em; border-radius: 4px;">
+                {% for item in ath_profit_preview.to_create %}
+                <div style="padding: 0.2em 0;">{{ item.symbol }} → ATH Profit: {{ item.ath_profit }} (with defaults: Index Type=TM, Result Date=Not Announced)</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if not ath_profit_preview.to_update and not ath_profit_preview.to_create and not ath_profit_preview.errors %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--info-color);">No Changes Required:</h5>
+            <p>All uploaded values are already the same as current values in the database.</p>
+        </div>
+        {% endif %}
+        
+        <div style="display: flex; gap: 1em;">
+            <form action="{{ url_for('confirm_ath_profit_upload') }}" method="post">
+                <button type="submit" class="submit-btn">Confirm Upload</button>
+            </form>
+            <a href="{{ url_for('profit_manager') }}" class="edit-btn">Cancel</a>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if result_date_preview %}
+    <div class="card" style="margin-top: 1em; background-color: #f8f9fa;">
+        <h4>Result Date Upload Preview</h4>
+        {% if result_date_preview.errors %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--danger-color);">Errors:</h5>
+            <ul style="color: var(--danger-color);">
+                {% for error in result_date_preview.errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        
+        {% if result_date_preview.to_update %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--primary-color);">Will Update ({{ result_date_preview.to_update|length }} entries):</h5>
+            <div style="max-height: 200px; overflow-y: auto; background: white; padding: 0.5em; border-radius: 4px;">
+                {% for item in result_date_preview.to_update %}
+                <div style="padding: 0.2em 0;">{{ item.symbol }} → Result Date: {{ item.old_value }} → {{ item.result_date }}</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if result_date_preview.to_create %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--success-color);">Will Create ({{ result_date_preview.to_create|length }} entries):</h5>
+            <div style="max-height: 200px; overflow-y: auto; background: white; padding: 0.5em; border-radius: 4px;">
+                {% for item in result_date_preview.to_create %}
+                <div style="padding: 0.2em 0;">{{ item.symbol }} → Result Date: {{ item.result_date }} (with defaults: ATH Profit=N, Index Type=TM)</div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if not result_date_preview.to_update and not result_date_preview.to_create and not result_date_preview.errors %}
+        <div style="margin-bottom: 1em;">
+            <h5 style="color: var(--info-color);">No Changes Required:</h5>
+            <p>All uploaded values are already the same as current values in the database.</p>
+        </div>
+        {% endif %}
+        
+        <div style="display: flex; gap: 1em;">
+            <form action="{{ url_for('confirm_result_date_upload') }}" method="post">
+                <button type="submit" class="submit-btn">Confirm Upload</button>
+            </form>
+            <a href="{{ url_for('profit_manager') }}" class="edit-btn">Cancel</a>
+        </div>
+    </div>
+    {% endif %}
+
+    <form id="multi-delete-form" action="{{ url_for('delete_profit_entries') }}" method="post">
+        
+        <div style="margin-top: 0.8em; margin-bottom: 0.8em; text-align: right;">
+            <button type="submit" class="delete-btn" onclick="return confirm('Are you sure you want to permanently delete the selected stocks and all their associated data? This cannot be undone.');">Delete Selected</button>
+        </div>
+
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="select-all-checkbox"></th>
+                        <th>Stock Symbol</th>
+                        <th>ATH Profit</th>
+                        <th>Index Type</th>
+			<th>Result Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stock in stocks %}
+                    <tr>
+                        <td><input type="checkbox" name="profit_ids" value="{{ stock.id }}"></td>
+                        <td><b>{{ stock.symbol }}</b></td>
+                        <td>
+                            {{ stock.ath_profit }}
+                        </td>
+                        <td>
+                            {{ stock.idx_type }}
+                        </td>
+			<td>{{ stock.result_date }}</td>
+                        <td class="actions-cell">
+                             <a href="{{ url_for('edit_profit_record', record_id=stock.id) }}" class="edit-btn">Edit</a>
+                             <form action="{{ url_for('delete_profit_record', stock_id=stock.id) }}" method="post" onsubmit="return confirm('Are you sure you want to permanently delete all records for {{ stock.symbol }}?');" style="all: initial; display:inline;">
+                                <button type="submit" class="delete-btn">Del</button>
+                            </form>
+                            <form action="{{ url_for('toggle_profit_status', stock_id=stock.id, column_name='ath_profit') }}" method="post" style="all: initial; display:inline; margin-left:10px;">
+                                <button type="submit" class="edit-btn" style="padding: 5px 8px; font-size: 10px;">Toggle ATH</button>
+                            </form>
+                            <form action="{{ url_for('toggle_index_type', stock_id=stock.id) }}" method="post" style="all: initial; display:inline; margin-left:10px;">
+                                <button type="submit" class="edit-btn" style="padding: 5px 8px; font-size: 10px;">Toggle Index</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" style="text-align: center; padding: 40px;">Your Profit Tracker is empty.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </form>
+    
+    <script>
+        document.getElementById('select-all-checkbox').addEventListener('click', function(event) {
+            const checkboxes = document.querySelectorAll('input[name="profit_ids"]');
+            checkboxes.forEach(function(checkbox) { checkbox.checked = event.target.checked; });
+        });
+    </script>
+{% endblock %}

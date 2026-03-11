@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ stock.symbol }}{% endblock %}
+
+{% block content %}
+    <h2>Edit Daily Tracker Entry for <span style="color:var(--primary-color);">{{ stock.symbol }}</span></h2>
+    <form action="{{ url_for('edit_stock', stock_id=stock.id) }}" method="post">
+        <div class="form-grid">
+            <div>
+                <label>ATH Profit (Permanent)</label>
+                <input type="text" value="{{ stock.ath_profit }}" readonly>
+            </div>
+            <div>
+                <label>Index Type (Permanent)</label>
+                <input type="text" value="{{ stock.idx_type }}" readonly>
+            </div>
+            
+            <hr style="grid-column: 1 / -1; border: 0; border-top: 1px solid #eee;">
+
+            <div>
+                <label for="rounding">Rounding (Trigger Price)</label>
+                <input type="number" step="0.01" id="rounding" name="rounding" required value="{{ stock.rounding }}">
+            </div>
+            <div>
+                <label for="stop_loss">Stop Loss (₹) (Optional)</label>
+                <input type="number" step="0.01" id="stop_loss" name="stop_loss" value="{{ stock.stop_loss or '' }}">
+            </div>
+            <div>
+                <label for="ath_outperformance">ATH Outperformance? (Daily)</label>
+                <select id="ath_outperformance" name="ath_outperformance" required>
+                    <option value="Y" {% if stock.ath_outperformance == 'Y' %}selected{% endif %}>Y</option>
+                    <option value="N" {% if stock.ath_outperformance == 'N' %}selected{% endif %}>N</option>
+                </select>
+            </div>
+            <div>
+                <label for="is_green_candle">Green Candle?</label>
+                <select id="is_green_candle" name="is_green_candle" required>
+                    <option value="Y" {% if stock.is_green_candle == 'Y' %}selected{% endif %}>Y</option>
+                    <option value="N" {% if stock.is_green_candle == 'N' %}selected{% endif %}>N</option>
+                </select>
+            </div>
+            <div>
+                <label for="is_close_above_ath">Close > ATH?</label>
+                <select id="is_close_above_ath" name="is_close_above_ath" required>
+                    <option value="Y" {% if stock.is_close_above_ath == 'Y' %}selected{% endif %}>Y</option>
+                    <option value="N" {% if stock.is_close_above_ath == 'N' %}selected{% endif %}>N</option>
+                </select>
+            </div>
+        </div>
+        <button type="submit" class="submit-btn">Save Changes</button>
+        <a href="{{ url_for('dashboard') }}" style="display:block; text-align:center; margin-top:1em; color: var(--secondary-color);">Cancel</a>
+    </form>
+{% endblock %}

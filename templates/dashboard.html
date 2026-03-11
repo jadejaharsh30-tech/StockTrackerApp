@@ -1,0 +1,771 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - ATH Tracker{% endblock %}
+
+{% block content %}
+<style>
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5em;
+        margin-bottom: 1.5em;
+    }
+
+    @media (max-width: 768px) {
+        .dashboard-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<!-- Top Row: Quick Stats & Widgets -->
+<div class="dashboard-grid" style="grid-template-columns: 1fr; gap: 1.5em;">
+
+    <div style="display: flex; gap: 1.5em; flex-wrap: wrap;">
+        <!-- Stock Count Widget -->
+        <div class="card glass-card stagger-fade-in delay-1"
+            style="flex: 1; min-width: 250px; display: flex; align-items: center; justify-content: space-between; padding: 1.5em;">
+            <div>
+                <h4 style="margin: 0; color: var(--secondary-color); font-size: 1em;">Active Stocks</h4>
+                <div style="font-size: 2.5em; font-weight: 700; color: var(--primary-color);">{{ stocks|length }}</div>
+            </div>
+            <div style="font-size: 2.5em; opacity: 0.2;">📈</div>
+        </div>
+
+        <div class="card glass-card stagger-fade-in delay-2"
+            style="flex: 2; min-width: 300px; padding: 0.7em 1em; display: flex; align-items: center; justify-content: space-around;">
+            <!-- Best Performer -->
+            <div
+                style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #eee;">
+                <div style="font-size: 1.3em; color: var(--success-color);">🏆</div>
+                <div style="font-size: 0.95em; color: var(--secondary-color); font-weight: 600;">Best</div>
+                <div id="best-performer-symbol"
+                    style="font-size: 1.1em; font-weight: 700; color: var(--success-color);">-</div>
+                <div id="best-performer-change" style="font-size: 0.85em; color: var(--secondary-color);">&nbsp;</div>
+            </div>
+            <!-- Worst Performer -->
+            <div
+                style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; border-right: 1px solid #eee;">
+                <div style="font-size: 1.3em; color: var(--danger-color);">💔</div>
+                <div style="font-size: 0.95em; color: var(--secondary-color); font-weight: 600;">Worst</div>
+                <div id="worst-performer-symbol"
+                    style="font-size: 1.1em; font-weight: 700; color: var(--danger-color);">-</div>
+                <div id="worst-performer-change" style="font-size: 0.85em; color: var(--secondary-color);">&nbsp;</div>
+            </div>
+            <!-- Upcoming Results -->
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                <div style="font-size: 1.3em; color: var(--warning-color);">📅</div>
+                <div style="font-size: 0.95em; color: var(--secondary-color); font-weight: 600;">Results</div>
+                <div id="upcoming-results-count"
+                    style="font-size: 1.6em; font-weight: 700; color: var(--warning-color);">
+                    {% if upcoming_results is mapping and 'count' in upcoming_results %}{{ upcoming_results['count']
+                    }}{% else %}{{ upcoming_results }}{% endif %}
+                </div>
+            </div>
+
+            <div
+                style="display: flex; flex-direction: column; align-items: center; justify-content: center; margin-left: 1em;">
+                <button id="refresh-performer-btn" class="edit-btn"
+                    style="padding: 6px 16px; font-size: 1em;">🔄</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Compact Search & Filter Stocks Widget (above table) -->
+<div class="card" style="margin-bottom: 1em; padding: 0.7em 1em; font-size: 0.95em;">
+    <h4 style="margin-bottom: 0.5em; font-size: 1.1em;">🔍 Search & Filter Stocks</h4>
+    <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5em;">
+        <div>
+            <label for="search-symbol" style="font-size: 0.95em;">Symbol</label>
+            <input type="text" id="search-symbol" placeholder="Search by symbol..." class="ticker-autocomplete"
+                style="font-size: 0.95em; padding: 4px 8px;">
+        </div>
+        <div>
+            <label for="filter-category" style="font-size: 0.95em;">Category</label>
+            <select id="filter-category" style="font-size: 0.95em; padding: 4px 8px;">
+                <option value="">All Categories</option>
+                <option value="FUND">FUND</option>
+                <option value="PROP">PROP</option>
+                <option value="NO ENTRY">NO ENTRY</option>
+            </select>
+        </div>
+        <div>
+            <label for="filter-trigger" style="font-size: 0.95em;">Final Trigger</label>
+            <select id="filter-trigger" style="font-size: 0.95em; padding: 4px 8px;">
+                <option value="">All Triggers</option>
+                <option value="GO">GO</option>
+                <option value="WAIT">WAIT</option>
+            </select>
+        </div>
+        <div>
+            <label for="filter-risk" style="font-size: 0.95em;">Risk Level</label>
+            <select id="filter-risk" style="font-size: 0.95em; padding: 4px 8px;">
+                <option value="">All Risks</option>
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+            </select>
+        </div>
+    </div>
+    <div style="margin-top: 0.5em; display: flex; gap: 8px;">
+        <button onclick="applyFilters()" class="submit-btn"
+            style="margin-top: 0; padding: 6px 12px; font-size: 0.95em;">Apply Filters</button>
+        <button onclick="clearFilters()" class="edit-btn"
+            style="margin-top: 0; padding: 6px 12px; font-size: 0.95em;">Clear Filters</button>
+    </div>
+</div>
+
+<!-- Archive All Button (top of dashboard) -->
+<form action="{{ url_for('manual_archive') }}" method="post" style="margin-bottom: 1em;">
+    <button type="submit" class="submit-btn"
+        onclick="return confirm('Are you sure you want to archive ALL stocks in your daily tracker? This cannot be undone.')">Archive
+        All</button>
+</form>
+
+<!-- Stock Tracker Table -->
+<form action="{{ url_for('delete_selected') }}" method="post" id="multi-delete-form">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="select-all-checkbox"></th>
+                    <th>Stock Details</th>
+                    <th>CMP (₹)</th>
+                    <th>Category</th>
+                    <th>Risk</th>
+                    <th>Final Trigger</th>
+                    <th>Result Date</th>
+                    <th>Remarks</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stock in stocks %}
+                <tr data-stock-id="{{ stock.id }}" data-category="{{ stock.category }}"
+                    data-stop-loss="{{ stock.stop_loss }}">
+                    <td><input type="checkbox" name="stock_ids" value="{{ stock.id }}"></td>
+                    <td>
+                        <b
+                            style="font-size: 1.1em; color: {% if stock.is_green_candle == 'Y' %}#28a745{% elif stock.is_green_candle == 'N' %}#dc3545{% else %}#6c757d{% endif %};">{{
+                            stock.symbol }}</b><br>
+                        <small>Rounding: {{ stock.rounding }} | SL: {{ stock.stop_loss or 'N/A' }}</small>
+                    </td>
+                    <td>{{ stock.cmp }}</td>
+                    <td>{{ stock.category }}</td>
+                    <td>{{ stock.risk }}</td>
+                    <td><span class="trigger-{{ stock.final_trigger.lower() }}">{{ stock.final_trigger }}</span></td>
+                    <td>{{ stock.result_date or '' }}</td>
+                    <td>{{ stock.remarks }}</td>
+                    <td class="actions-cell">
+                        <a href="{{ url_for('edit_stock', stock_id=stock.id) }}" class="edit-btn tooltip"
+                            data-tooltip="Edit stock details">Edit</a>
+                        <button type="button" class="edit-btn calc-toggle-btn tooltip"
+                            style="background-color: var(--success-color); margin-left: 5px;"
+                            data-tooltip="Calculate position size">Calculate</button>
+                    </td>
+                </tr>
+                <tr class="inline-calculator-row" style="display: none;">
+                    <td colspan="8" style="padding: 0.8em; background-color: #f8f9fa;">
+                        <div class="form-grid"
+                            style="align-items: end; gap: 12px 16px; padding: 0; box-shadow: none; margin: 0;">
+                            <div><label>Entry Price</label><input type="number" step="0.01" class="inline-entry-price"
+                                    placeholder="Enter Price"></div>
+                            <div><label>Stop Loss</label><input type="text" class="inline-stop-loss" readonly
+                                    style="background-color: #eee;"></div>
+                            <div><button type="button" class="submit-btn inline-calc-btn"
+                                    style="padding: 8px 12px; margin: 0;">Calculate</button></div>
+                            <div class="inline-calc-results"
+                                style="grid-column: 1 / -1; margin-top: 0.8em; font-weight: 500; min-height: 1.5em;">
+                            </div>
+                            <button type="button" class="close-inline-calc"
+                                style="position: absolute; right: 16px; top: 8px; background: none; border: none; font-size: 1.5em; color: #888; cursor: pointer;">&times;</button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" style="text-align: center; padding: 40px;">Your daily tracker is empty. Add a stock
+                        below to begin.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if stocks %}
+    <div style="margin-top: 1em; text-align: right;">
+        <div style="display: flex; gap: 10px; align-items: center; justify-content: flex-end;">
+            <select id="bulk-action" style="padding: 8px; border-radius: var(--border-radius); border: 1px solid #ccc;">
+                <option value="">Bulk Actions...</option>
+                <option value="delete">Delete Selected</option>
+                <option value="archive">Archive Selected</option>
+                <option value="export">Export Selected</option>
+            </select>
+            <button type="submit" class="delete-btn"
+                onclick="return confirm('Are you sure you want to delete the selected stocks?');">Delete
+                Selected</button>
+        </div>
+    </div>
+    {% endif %}
+</form>
+
+<h2 id="add-stock-form">Add New Stock to Daily Tracker</h2>
+<form action="{{ url_for('add_stock') }}" method="post" id="add-stock-form">
+    <div class="form-grid" style="gap: 0.8em; grid-template-columns: repeat(4, 1fr);">
+        <div class="autocomplete">
+            <label for="symbol" class="tooltip" data-tooltip="Enter the stock symbol (e.g., RELIANCE, TCS)">Company
+                Ticker</label>
+            <input type="text" id="symbol" name="symbol" class="ticker-autocomplete" required
+                placeholder="e.g., RELIANCE" autocomplete="off" data-validation="required">
+            <div class="validation-message" id="symbol-error"></div>
+        </div>
+        <div>
+            <label for="rounding" class="tooltip" data-tooltip="The price level that triggers your entry">Rounding
+                (Trigger Price)</label>
+            <input type="number" step="0.01" id="rounding" name="rounding" required data-validation="required,positive">
+            <div class="validation-message" id="rounding-error"></div>
+        </div>
+        <div>
+            <label for="stop_loss" class="tooltip" data-tooltip="Optional stop loss price for risk management">Stop Loss
+                (₹) (Optional)</label>
+            <input type="number" step="0.01" id="stop_loss" name="stop_loss" data-validation="positive">
+            <div class="validation-message" id="stop_loss-error"></div>
+        </div>
+        <div>
+            <label for="ath_outperformance" class="tooltip"
+                data-tooltip="Does the stock outperform its ATH on a daily basis?">ATH Outperformance? (Daily)</label>
+            <select id="ath_outperformance" name="ath_outperformance" required data-validation="required">
+                <option value="" disabled selected></option>
+                <option value="Y">Y</option>
+                <option value="N">N</option>
+            </select>
+            <div class="validation-message" id="ath_outperformance-error"></div>
+        </div>
+        <div>
+            <label for="ath_profit" class="tooltip" data-tooltip="Is this stock profitable at ATH levels?">ATH
+                Profit?</label>
+            <select id="ath_profit" name="ath_profit" required data-validation="required">
+                <option value="" disabled selected></option>
+                <option value="Y">Y</option>
+                <option value="N">N</option>
+            </select>
+            <div class="validation-message" id="ath_profit-error"></div>
+        </div>
+        <div>
+            <label for="idx_type" class="tooltip" data-tooltip="FNO = Futures & Options, TM = Trading">Index</label>
+            <select id="idx_type" name="idx_type" required data-validation="required">
+                <option value="" disabled selected></option>
+                <option value="FNO">FNO</option>
+                <option value="TM">TM</option>
+            </select>
+            <div class="validation-message" id="idx_type-error"></div>
+        </div>
+        <div>
+            <label for="is_green_candle" class="tooltip" data-tooltip="Is the current candle green (bullish)?">Green
+                Candle?</label>
+            <select id="is_green_candle" name="is_green_candle" required data-validation="required">
+                <option value="" disabled selected></option>
+                <option value="Y">Y</option>
+                <option value="N">N</option>
+            </select>
+            <div class="validation-message" id="is_green_candle-error"></div>
+        </div>
+        <div>
+            <label for="is_close_above_ath" class="tooltip" data-tooltip="Is the current close above the ATH?">Close >
+                ATH?</label>
+            <select id="is_close_above_ath" name="is_close_above_ath" required data-validation="required">
+                <option value="" disabled selected></option>
+                <option value="Y">Y</option>
+                <option value="N">N</option>
+            </select>
+            <div class="validation-message" id="is_close_above_ath-error"></div>
+        </div>
+    </div>
+    <button type="submit" class="submit-btn" id="submit-btn" data-tooltip="Add this stock to your daily tracker">Add
+        Stock to Tracker</button>
+</form>
+
+<div
+    style="background-color: #fff; padding: 1em; border-radius: var(--border-radius); box-shadow: var(--shadow); margin-top: 1em;">
+    <h4>Global Position Sizing Calculator</h4>
+    <div class="form-grid" id="global-calculator" style="gap: 0.8em;">
+        <div><label>Total Capital (₹)</label><input type="number" id="calc-total-capital" placeholder="e.g., 10000000">
+        </div>
+        <div><label>Risk per Trade %</label><input type="number" step="0.1" id="calc-risk-pct" placeholder="e.g., 1.0">
+        </div>
+        <div><label>Your Entry Price</label><input type="number" step="0.01" id="calc-entry-price"
+                placeholder="Enter Price"></div>
+        <div><label>Your Stop Loss</label><input type="number" step="0.01" id="calc-stop-loss" placeholder="Enter SL">
+        </div>
+        <button type="button" id="global-calc-btn" class="submit-btn"
+            style="margin-top: 0; align-self: end;">Calculate</button>
+    </div>
+    <div id="global-calc-results"
+        style="margin-top: 1em; padding-top: 1em; border-top: 1px solid var(--light-grey); font-weight: 500; min-height: 1.5em;">
+    </div>
+
+</div>
+
+<!-- Help Section -->
+<div
+    style="background-color: #fff; padding: 1em; border-radius: var(--border-radius); box-shadow: var(--shadow); margin-top: 1em;">
+    <h4 style="cursor: pointer;" onclick="toggleHelp()" class="tooltip" data-tooltip="Click to expand/collapse help">
+        ❓ Help & Keyboard Shortcuts
+    </h4>
+    <div id="help-content" style="display: none; margin-top: 0.8em;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.8em;">
+            <div>
+                <h5>⌨️ Keyboard Shortcuts</h5>
+                <ul style="list-style: none; padding: 0;">
+                    <li><kbd>/</kbd> - Focus search input</li>
+                    <li><kbd>Ctrl+R</kbd> - Refresh data</li>
+                    <li><kbd>Ctrl+S</kbd> - Focus search</li>
+                    <li><kbd>Ctrl+Enter</kbd> - Submit form</li>
+                    <li><kbd>Esc</kbd> - Close modals/calculators</li>
+                </ul>
+            </div>
+            <div>
+                <h5>💡 Tips</h5>
+                <ul style="list-style: none; padding: 0;">
+                    <li>• Use the search filters to find specific stocks</li>
+                    <li>• Click "Calculate" to see position sizing for each stock</li>
+                    <li>• Use bulk actions to manage multiple stocks</li>
+                    <li>• Hover over labels for detailed explanations</li>
+                    <li>• Use the global calculator for quick position sizing</li>
+                </ul>
+            </div>
+            <div>
+                <h5>🔧 Features</h5>
+                <ul style="list-style: none; padding: 0;">
+                    <li>• Real-time form validation</li>
+                    <li>• Autocomplete for stock symbols</li>
+                    <li>• Undo functionality for deletions</li>
+                    <li>• Export/import capabilities</li>
+                    <li>• Mobile responsive design</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('select-all-checkbox').addEventListener('click', function (event) {
+        const checkboxes = document.querySelectorAll('#multi-delete-form input[name="stock_ids"]');
+        checkboxes.forEach(function (checkbox) {
+            checkbox.checked = event.target.checked;
+        });
+        updateBulkActionVisibility();
+    });
+
+    // Bulk operations functionality
+    function updateBulkActionVisibility() {
+        const selectedCheckboxes = document.querySelectorAll('#multi-delete-form input[name="stock_ids"]:checked');
+        const bulkAction = document.getElementById('bulk-action');
+        const deleteBtn = document.querySelector('.delete-btn');
+
+        if (selectedCheckboxes.length > 0) {
+            bulkAction.style.display = 'inline-block';
+            deleteBtn.style.display = 'inline-block';
+        } else {
+            bulkAction.style.display = 'none';
+            deleteBtn.style.display = 'none';
+        }
+    }
+
+    // Add event listeners for individual checkboxes
+    document.querySelectorAll('#multi-delete-form input[name="stock_ids"]').forEach(function (checkbox) {
+        checkbox.addEventListener('change', updateBulkActionVisibility);
+    });
+
+    // Bulk action handler
+    document.getElementById('bulk-action').addEventListener('change', function () {
+        const action = this.value;
+        const selectedCheckboxes = document.querySelectorAll('#multi-delete-form input[name="stock_ids"]:checked');
+
+        if (!action || selectedCheckboxes.length === 0) return;
+
+        const selectedIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+        switch (action) {
+            case 'delete':
+                if (confirm(`Are you sure you want to delete ${selectedIds.length} selected stocks?`)) {
+                    // Submit the form
+                    document.getElementById('multi-delete-form').submit();
+                }
+                break;
+            case 'archive':
+                if (confirm(`Are you sure you want to archive ${selectedIds.length} selected stocks?`)) {
+                    // Could implement AJAX call for archiving
+                    showNotification(`${selectedIds.length} stocks archived successfully`, 'success');
+                }
+                break;
+            case 'export':
+                // Export selected stocks
+                exportSelectedStocks(selectedIds);
+                break;
+        }
+
+        // Reset the dropdown
+        this.value = '';
+    });
+
+    function exportSelectedStocks(ids) {
+        // Create a temporary form to export selected stocks
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/export-selected-stocks';
+
+        ids.forEach(id => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'stock_ids';
+            input.value = id;
+            form.appendChild(input);
+        });
+
+        document.body.appendChild(form);
+        form.submit();
+        document.body.removeChild(form);
+    }
+
+    // Initialize bulk action visibility
+    updateBulkActionVisibility();
+
+    // Set current timestamp
+    function updateTimestamp() {
+        const now = new Date();
+        const timestamp = now.toLocaleString('en-US', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        document.getElementById('last-updated').textContent = timestamp;
+    }
+
+    // Update timestamp on page load
+    updateTimestamp();
+
+    // Enhanced Search and Filter Functions
+    function applyFilters() {
+        const symbol = document.getElementById('search-symbol').value.toLowerCase();
+        const category = document.getElementById('filter-category').value;
+        const trigger = document.getElementById('filter-trigger').value;
+        const risk = document.getElementById('filter-risk').value;
+
+        const rows = document.querySelectorAll('#multi-delete-form tbody tr[data-stock-id]');
+        let visibleCount = 0;
+
+        rows.forEach(row => {
+            const stockSymbol = row.querySelector('td:nth-child(2) b').textContent.toLowerCase();
+            const stockCategory = row.querySelector('td:nth-child(4)').textContent;
+            const stockTrigger = row.querySelector('td:nth-child(6) span').textContent;
+            const stockRisk = row.querySelector('td:nth-child(5)').textContent;
+
+            let shouldShow = true;
+
+            if (symbol && !stockSymbol.includes(symbol)) shouldShow = false;
+            if (category && stockCategory !== category) shouldShow = false;
+            if (trigger && stockTrigger !== trigger) shouldShow = false;
+            if (risk && stockRisk !== risk) shouldShow = false;
+
+            row.style.display = shouldShow ? '' : 'none';
+            if (shouldShow) visibleCount++;
+        });
+
+        // Show/hide the "no results" row
+        const noResultsRow = document.querySelector('#multi-delete-form tbody tr:not([data-stock-id])');
+        if (noResultsRow) {
+            noResultsRow.style.display = visibleCount === 0 ? '' : 'none';
+        }
+
+        showNotification(`Showing ${visibleCount} of ${rows.length} stocks`, 'info');
+    }
+
+    function clearFilters() {
+        document.getElementById('search-symbol').value = '';
+        document.getElementById('filter-category').value = '';
+        document.getElementById('filter-trigger').value = '';
+        document.getElementById('filter-risk').value = '';
+
+        const rows = document.querySelectorAll('#multi-delete-form tbody tr[data-stock-id]');
+        rows.forEach(row => {
+            row.style.display = '';
+        });
+
+        showNotification('Filters cleared', 'info');
+    }
+
+    function refreshData() {
+        showLoading('Refreshing data...');
+        setTimeout(() => {
+            hideLoading();
+            updateTimestamp();
+            showNotification('Data refreshed successfully', 'success');
+        }, 1000);
+    }
+
+    // Add keyboard shortcuts for search
+    document.getElementById('search-symbol').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            applyFilters();
+        }
+    });
+
+    // Help section toggle
+    function toggleHelp() {
+        const helpContent = document.getElementById('help-content');
+        helpContent.style.display = helpContent.style.display === 'none' ? 'block' : 'none';
+    }
+
+    // Top Performers Widget Toggle
+    function togglePerformers() {
+        const dropdown = document.getElementById('performers-dropdown');
+        const arrow = document.getElementById('performers-arrow');
+        dropdown.style.display = dropdown.style.display === 'none' ? 'block' : 'none';
+        arrow.textContent = dropdown.style.display === 'none' ? '▲' : '▼';
+    }
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Inline calculator logic
+        let openCalcRow = null;
+        let openStockRow = null;
+        function closeInlineCalc() {
+            if (openCalcRow) openCalcRow.style.display = 'none';
+            openCalcRow = null;
+            openStockRow = null;
+        }
+        document.querySelectorAll('.calc-toggle-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                const stockRow = btn.closest('tr[data-stock-id]');
+                const calcRow = stockRow.nextElementSibling;
+                // Close any open calculator
+                if (openCalcRow && openCalcRow !== calcRow) closeInlineCalc();
+                // Toggle this calculator
+                if (calcRow.style.display === 'none') {
+                    // Set up values
+                    const stopLoss = stockRow.getAttribute('data-stop-loss');
+                    const category = stockRow.getAttribute('data-category');
+                    calcRow.querySelector('.inline-stop-loss').value = stopLoss || '';
+                    calcRow.querySelector('.inline-entry-price').value = '';
+                    calcRow.querySelector('.inline-calc-results').innerHTML = '';
+                    calcRow.style.position = 'relative';
+                    calcRow.style.display = '';
+                    openCalcRow = calcRow;
+                    openStockRow = stockRow;
+                } else {
+                    closeInlineCalc();
+                }
+            });
+        });
+        // Calculate logic
+        document.querySelectorAll('.inline-calc-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                const calcRow = btn.closest('.inline-calculator-row');
+                const stockRow = calcRow.previousElementSibling;
+                const entry = parseFloat(calcRow.querySelector('.inline-entry-price').value);
+                const stopLoss = parseFloat(calcRow.querySelector('.inline-stop-loss').value);
+                const category = stockRow.getAttribute('data-category');
+                const totalCapital = 10000000;
+                const riskPct = (category === 'FUND') ? 1.2 : 10;
+                // Calculation logic
+                if (isNaN(entry) || isNaN(stopLoss) || entry <= 0 || stopLoss <= 0) {
+                    calcRow.querySelector('.inline-calc-results').innerHTML = '<span style="color:var(--danger-color)">Please fill all fields with positive numbers.</span>';
+                    return;
+                }
+                if (entry <= stopLoss) {
+                    calcRow.querySelector('.inline-calc-results').innerHTML = '<span style="color:var(--danger-color)">Entry price must be higher than stop loss.</span>';
+                    return;
+                }
+                const riskPerShare = entry - stopLoss;
+                const capitalToRisk = totalCapital * (riskPct / 100);
+                const sharesToBuy = Math.floor(capitalToRisk / riskPerShare);
+                const amountRequired = sharesToBuy * entry;
+                const allocation = (amountRequired / totalCapital) * 100;
+                if (category === 'FUND') {
+                    calcRow.querySelector('.inline-calc-results').innerHTML = `Allocation: <b>${allocation.toFixed(2)}%</b>`;
+                } else if (category === 'PROP') {
+                    calcRow.querySelector('.inline-calc-results').innerHTML = `Shares: <b>${sharesToBuy}</b>`;
+                } else {
+                    calcRow.querySelector('.inline-calc-results').innerHTML = '<span style="color:var(--danger-color)">Unknown category.</span>';
+                }
+            });
+        });
+        // Close button logic
+        document.querySelectorAll('.close-inline-calc').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                closeInlineCalc();
+            });
+        });
+        // Close on outside click
+        document.addEventListener('mousedown', function (e) {
+            if (openCalcRow && !openCalcRow.contains(e.target) && (!openStockRow || !openStockRow.contains(e.target))) {
+                closeInlineCalc();
+            }
+        });
+
+        // AJAX Add Stock to Tracker
+        const addStockForm = document.getElementById('add-stock-form');
+        if (addStockForm) {
+            addStockForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                const formData = new FormData(addStockForm);
+                const data = {};
+                formData.forEach((value, key) => { data[key] = value; });
+                fetch('/add_stock_ajax', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                })
+                    .then(response => response.json())
+                    .then(res => {
+                        if (res.success) {
+                            // Add new row to table
+                            const row = res.row;
+                            const tbody = document.querySelector('#multi-delete-form tbody');
+                            if (tbody) {
+                                const tr = document.createElement('tr');
+                                tr.setAttribute('data-stock-id', row.id);
+                                tr.setAttribute('data-category', row.category);
+                                tr.setAttribute('data-stop-loss', row.stop_loss);
+                                tr.innerHTML = `
+                            <td><input type="checkbox" name="stock_ids" value="${row.id}"></td>
+                            <td><b style="font-size: 1.1em;">${row.symbol}</b><br><small>Rounding: ${row.rounding} | SL: ${row.stop_loss || 'N/A'}</small></td>
+                            <td>${row.cmp}</td>
+                            <td>${row.category}</td>
+                            <td>${row.risk}</td>
+                            <td><span class="trigger-${row.final_trigger.toLowerCase()}">${row.final_trigger}</span></td>
+                            <td>${row.result_date ? row.result_date : ''}</td>
+                            <td>${row.remarks}</td>
+                            <td class="actions-cell">
+                                <a href="/edit/${row.id}" class="edit-btn tooltip" data-tooltip="Edit stock details">Edit</a>
+                                <button type="button" class="edit-btn calc-toggle-btn tooltip" style="background-color: var(--success-color); margin-left: 5px;" data-tooltip="Calculate position size">Calculate</button>
+                            </td>
+                        `;
+                                tbody.prepend(tr);
+                            }
+                            addStockForm.reset();
+                            showNotification('Stock added successfully!', 'success');
+                        } else {
+                            showNotification(res.error || 'Error adding stock.', 'danger');
+                        }
+                    })
+                    .catch(() => {
+                        showNotification('Error adding stock.', 'danger');
+                    });
+            });
+        }
+
+        // Best/Worst Performer Widget Refresh
+        const refreshBtn = document.getElementById('refresh-performer-btn');
+        const loadingSpan = document.getElementById('performer-loading');
+        function setPerformerWidget(best, worst) {
+            if (best) {
+                document.getElementById('best-performer-symbol').textContent = best.symbol;
+                document.getElementById('best-performer-change').textContent = `+${best.change_pct}%`;
+            } else {
+                document.getElementById('best-performer-symbol').textContent = '-';
+                document.getElementById('best-performer-change').textContent = '';
+            }
+            if (worst) {
+                document.getElementById('worst-performer-symbol').textContent = worst.symbol;
+                document.getElementById('worst-performer-change').textContent = `${worst.change_pct}%`;
+            } else {
+                document.getElementById('worst-performer-symbol').textContent = '-';
+                document.getElementById('worst-performer-change').textContent = '';
+            }
+        }
+        // Load cached data on page load
+        fetch('/dashboard_performer_widget_cached')
+            .then(response => response.json())
+            .then(data => {
+                setPerformerWidget(data.best_performer, data.worst_performer);
+            });
+        function updatePerformerWidget() {
+            loadingSpan.style.display = 'inline';
+            fetch('/dashboard_performer_widget')
+                .then(response => response.json())
+                .then(data => {
+                    loadingSpan.style.display = 'none';
+                    setPerformerWidget(data.best_performer, data.worst_performer);
+                })
+                .catch(() => {
+                    loadingSpan.style.display = 'none';
+                    setPerformerWidget(null, null);
+                });
+        }
+        refreshBtn.addEventListener('click', updatePerformerWidget);
+        refreshBtn.addEventListener('click', updatePerformerWidget);
+
+        // --- Portfolio Chart Initialization ---
+        {% if portfolio_allocation %}
+        const ctx = document.getElementById('portfolioChart').getContext('2d');
+        const portfolioChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: {{ portfolio_allocation.labels | tojson }},
+        datasets: [{
+            data: {{ portfolio_allocation.data | tojson }},
+        backgroundColor: {{ portfolio_allocation.background_colors | tojson }},
+        borderWidth: 0,
+        hoverOffset: 15
+            }]
+        },
+        options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '70%',
+        plugins: {
+            legend: {
+                position: 'right',
+                labels: {
+                    color: getComputedStyle(document.body).getPropertyValue('--secondary-color'),
+                    font: {
+                        family: "'Inter', sans-serif",
+                        size: 11
+                    },
+                    boxWidth: 12,
+                    usePointStyle: true,
+                    padding: 15
+                }
+            },
+            tooltip: {
+                backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                titleColor: '#1a365d',
+                bodyColor: '#2d3748',
+                borderColor: '#e2e8f0',
+                borderWidth: 1,
+                padding: 12,
+                displayColors: true,
+                callbacks: {
+                    label: function (context) {
+                        let label = context.label || '';
+                        if (label) {
+                            label += ': ';
+                        }
+                        const value = context.raw || 0;
+                        const total = context.chart._metasets[context.datasetIndex].total;
+                        const percentage = ((value / total) * 100).toFixed(1) + "%";
+                        return label + percentage;
+                    }
+                }
+            }
+        },
+        layout: {
+            padding: 10
+        }
+    }
+    });
+    {% endif %}
+
+        });
+</script>
+{% endblock %}

@@ -1,0 +1,975 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    .scanner-controls {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin-bottom: 16px;
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .scanner-btn {
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: none;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s;
+    }
+
+    .btn-run-daily {
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: white;
+    }
+
+    .btn-run-daily:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.2);
+    }
+
+    .btn-refresh {
+        background: var(--hover-bg);
+        color: var(--text-color);
+        border: 1px solid var(--border-color);
+    }
+
+    .btn-refresh:hover {
+        background: var(--bg-color);
+    }
+
+    .btn-bulk-add {
+        background: linear-gradient(135deg, #6366f1, #4f46e5);
+        color: white;
+        padding: 10px 24px;
+        border-radius: 8px;
+        border: none;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.2s;
+    }
+
+    .btn-bulk-add:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
+
+    .btn-bulk-add:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+    }
+
+    .spinner {
+        width: 20px;
+        height: 20px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s ease-in-out infinite;
+        display: none;
+    }
+
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
+    }
+
+    .results-section {
+        background: var(--card-bg);
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+        overflow: hidden;
+    }
+
+    .results-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .results-table th,
+    .results-table td {
+        padding: 12px 16px;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .results-table th {
+        background: var(--bg-color);
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        font-weight: 600;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+    }
+
+    .results-table tbody tr:hover {
+        background: var(--hover-bg);
+    }
+
+    .badge-y {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 700;
+    }
+
+    .badge-n {
+        background: rgba(239, 68, 68, 0.12);
+        color: #ef4444;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 700;
+    }
+
+    .badge-na {
+        background: #f1f5f9;
+        color: #94a3b8;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 0.8rem;
+    }
+
+    .inline-input {
+        width: 100px;
+        padding: 6px 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--bg-color);
+        color: var(--text-color);
+        font-size: 0.9rem;
+        text-align: right;
+    }
+
+    .inline-input:focus {
+        outline: 2px solid var(--primary-color);
+        border-color: var(--primary-color);
+    }
+
+    .select-checkbox {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+        accent-color: var(--primary-color);
+    }
+
+    /* Toast Notification */
+    .toast {
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        padding: 16px 24px;
+        border-radius: 12px;
+        color: white;
+        font-weight: 600;
+        z-index: 99999;
+        animation: slideUp 0.3s ease-out, fadeOut 0.5s ease 3.5s forwards;
+        max-width: 400px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .toast-success {
+        background: linear-gradient(135deg, #10b981, #059669);
+    }
+
+    .toast-warning {
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+    }
+
+    .toast-error {
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+    }
+
+    @keyframes slideUp {
+        from {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes fadeOut {
+        to {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+    }
+
+    /* --- TAB STYLES --- */
+    .tab-container {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 12px;
+        border-bottom: 2px solid var(--border-color);
+    }
+
+    .tab-btn {
+        padding: 12px 24px;
+        background: transparent;
+        border: none;
+        border-bottom: 3px solid transparent;
+        font-weight: 600;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-size: 1rem;
+        transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+        color: var(--primary-color);
+        background: rgba(0, 0, 0, 0.02);
+    }
+
+    .tab-btn.active {
+        color: var(--primary-color);
+        border-bottom-color: var(--primary-color);
+    }
+
+    .tab-content {
+        display: none;
+        animation: fadeIn 0.2s ease-out;
+    }
+
+    .tab-content.active {
+        display: block;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(5px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* --- DB MANAGE TABLE --- */
+    .search-bar {
+        width: 100%;
+        padding: 12px 15px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        margin-bottom: 15px;
+        font-size: 1rem;
+        background: var(--bg-color);
+        color: var(--text-color);
+    }
+
+    .editable-input {
+        width: 100%;
+        padding: 4px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+    }
+
+    .results-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .results-count {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        font-weight: 500;
+    }
+
+    .btn-primary {
+        background-color: var(--primary-color);
+        color: white;
+        padding: 14px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.1s;
+        font-size: 1rem;
+    }
+
+    .btn-primary:hover {
+        opacity: 0.9;
+    }
+
+    .btn-primary:active {
+        transform: scale(0.98);
+    }
+
+    /* Pull everything up */
+    .tab-content {
+        padding-top: 4px;
+    }
+</style>
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+    <h1 style="margin: 0; font-size: 1.5rem;">⚡ ATH Scanner</h1>
+</div>
+
+<div class="tab-container">
+    <button class="tab-btn active" onclick="openTab('scanner')">Scanner View</button>
+    <button class="tab-btn" onclick="openTab('database')">Manage Database 📂</button>
+</div>
+
+<!-- TAB 1: SCANNER -->
+<div id="tab-scanner" class="tab-content active">
+
+    <!-- Progress Bar (Moved to Top for better visibility and space) -->
+    <div id="progressContainer"
+        style="display:none; margin-bottom: 12px; background: var(--card-bg); padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border-color);">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span id="progressLabel"
+                style="font-weight: 600; color: var(--primary-color); font-size: 0.85rem;">Scanning...</span>
+            <span id="progressPercent" style="font-size: 0.85rem;">0%</span>
+        </div>
+        <div style="width: 100%; height: 6px; background: var(--bg-color); border-radius: 3px; overflow: hidden;">
+            <div id="progressBar"
+                style="width: 0%; height: 100%; background: linear-gradient(90deg, #10b981, #059669); transition: width 0.3s;">
+            </div>
+        </div>
+    </div>
+
+    <div class="scanner-controls" style="margin-bottom: 12px; padding: 10px 12px; gap: 12px;">
+        <button class="scanner-btn btn-run-daily" id="btnNewScan" onclick="runNewScanner()" style="padding: 8px 16px;">
+            <span class="spinner" id="spinNewScan"></span>
+            Run ATH Scan ⚡
+        </button>
+
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="scanner-btn btn-refresh" id="btnOldDailyScan" onclick="runDailyScan()"
+                style="padding: 6px 12px; font-size: 0.85rem;">
+                <span class="spinner" id="spinDaily"
+                    style="border-top-color: var(--text-color); width: 14px; height: 14px;"></span>
+                Legacy Daily 🔄
+            </button>
+
+            <button class="scanner-btn btn-refresh" id="btnRefresh" onclick="runRefresh()"
+                style="padding: 6px 12px; font-size: 0.85rem;">
+                <span class="spinner" id="spinRefresh"
+                    style="border-top-color: var(--text-color); width: 14px; height: 14px;"></span>
+                Refresh 🧹
+            </button>
+
+            <button class="scanner-btn btn-refresh" id="btnEodSync" onclick="runEodSync()"
+                style="padding: 6px 12px; font-size: 0.85rem; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border: none;">
+                <span class="spinner" id="spinEod" style="border-top-color: #fff; width: 14px; height: 14px;"></span>
+                EOD Sync 🌅
+            </button>
+        </div>
+
+        <div id="statusText"
+            style="margin-left: auto; font-weight: 500; font-family: monospace; font-size: 0.8rem; color: var(--text-muted);">
+        </div>
+    </div>
+
+    <!-- Scanner Results Section -->
+    <div class="results-section">
+        <div class="results-header" style="padding: 10px 16px;">
+            <span style="font-weight: 600; font-size: 0.95rem;">New ATH Hits Today</span>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <span class="results-count" id="selectedCount" style="font-size: 0.8rem;"></span>
+                <button class="btn-bulk-add" id="btnBulkAdd" onclick="bulkAddSelected()"
+                    style="display: none; padding: 6px 16px; font-size: 0.85rem;">
+                    ➕ Add Selected
+                </button>
+            </div>
+        </div>
+        <div id="resultsArea"
+            style="min-height: 80px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.9rem;">
+            No scan run yet. Click "Run ATH Scan" to start.
+        </div>
+    </div>
+</div>
+<!-- END TAB 1 -->
+
+<!-- TAB 2: DATABASE MANAGEMENT -->
+<div id="tab-database" class="tab-content">
+    <div class="card" style="padding: 20px;">
+        <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+            <input type="text" id="dbSearch" class="search-bar" placeholder="🔍 Search Database by Symbol..."
+                onkeyup="searchDatabase()" style="flex: 1; margin-bottom: 0;">
+            <button class="btn-primary" onclick="syncAllChanges()"
+                style="white-space: nowrap; background-color: var(--primary-color);">
+                🔄 Sync All to Backend
+            </button>
+        </div>
+
+        <div style="max-height: 600px; overflow-y: auto;">
+            <table class="results-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>ATH Price</th>
+                        <th>ATH Date</th>
+                        <th>Last Updated</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="dbTableBody">
+                    <tr>
+                        <td colspan="5" style="text-align:center;">Loading data...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ====================== NEW SCANNER (4-Strategy) ======================
+    let scannerPollInterval = null;
+
+    async function runNewScanner() {
+        const btn = document.getElementById('btnNewScan');
+        const spinner = document.getElementById('spinNewScan');
+        const status = document.getElementById('statusText');
+
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        status.innerText = "Starting 4-strategy scan...";
+        document.getElementById('progressContainer').style.display = 'block';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressBar').style.background = 'linear-gradient(90deg, #10b981, #059669)';
+
+        try {
+            const response = await fetch('/api/run-scanner', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                scannerPollInterval = setInterval(pollScannerStatus, 1500);
+            } else {
+                status.innerText = "⚠️ " + data.message;
+                btn.disabled = false;
+                spinner.style.display = 'none';
+            }
+        } catch (e) {
+            status.innerText = "Network Error";
+            btn.disabled = false;
+            spinner.style.display = 'none';
+        }
+    }
+
+    async function runEodSync() {
+        const btn = document.getElementById('btnEodSync');
+        const spinner = document.getElementById('spinEod');
+        const status = document.getElementById('statusText');
+
+        const checkboxes = document.querySelectorAll('.select-checkbox.row-check:checked');
+        if (checkboxes.length === 0) {
+            alert('Please select at least one stock to EOD Sync.');
+            return;
+        }
+
+        const selectedSymbols = Array.from(checkboxes).map(box => box.dataset.symbol);
+
+        if (!confirm(`Promote the ${selectedSymbols.length} selected ATH hits to become the new baseline for tomorrow? This should only be done after market close.`)) {
+            return;
+        }
+
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        status.innerText = `Running EOD Sync for ${selectedSymbols.length} stocks...`;
+
+        try {
+            const response = await fetch('/api/eod-promote', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbols: selectedSymbols })
+            });
+            const data = await response.json();
+
+            if (data.status === 'success') {
+                status.innerText = "✅ " + data.message;
+            } else {
+                status.innerText = "⚠️ " + data.message;
+            }
+        } catch (e) {
+            status.innerText = "Network Error";
+        } finally {
+            btn.disabled = false;
+            spinner.style.display = 'none';
+        }
+    }
+
+    async function pollScannerStatus() {
+        try {
+            const res = await fetch('/api/scanner/status');
+            const data = await res.json();
+
+            document.getElementById('progressLabel').innerText = data.message || "Running...";
+
+            let percent = 0;
+            if (data.total > 0) {
+                percent = Math.round((data.progress / data.total) * 100);
+            }
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressPercent').innerText = percent + '%';
+
+            if (!data.running) {
+                clearInterval(scannerPollInterval);
+                document.getElementById('btnNewScan').disabled = false;
+                document.getElementById('spinNewScan').style.display = 'none';
+                document.getElementById('statusText').innerText = "Scan Complete ✅";
+                document.getElementById('progressBar').style.background = 'var(--primary-color)';
+
+                // Render results
+                if (data.results && data.results.length > 0) {
+                    renderScannerResults(data.results);
+                } else {
+                    // Fallback: fetch from DB
+                    const dbRes = await fetch('/api/scanner/results');
+                    const dbData = await dbRes.json();
+                    if (dbData.length > 0) {
+                        renderScannerResults(dbData);
+                    } else {
+                        document.getElementById('resultsArea').innerHTML =
+                            '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No new ATH hits found in this scan.</div>';
+                    }
+                }
+            }
+        } catch (e) { /* pass */ }
+    }
+
+    function renderScannerResults(results) {
+        const area = document.getElementById('resultsArea');
+        area.innerHTML = '';
+        area.style.display = 'block';
+
+        if (!results || results.length === 0) {
+            area.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No new ATH hits found.</div>';
+            document.getElementById('btnBulkAdd').style.display = 'none';
+            return;
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.style.maxHeight = '850px';
+        wrapper.style.overflowY = 'auto';
+
+        const table = document.createElement('table');
+        table.className = 'results-table';
+        table.id = 'scannerResultsTable';
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th style="width: 40px;"><input type="checkbox" class="select-checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+                    <th>Symbol</th>
+                    <th>New ATH Price</th>
+                    <th>Trigger Price</th>
+                    <th>ATH O.P.</th>
+                    <th>Green Candle</th>
+                    <th>Close > ATH</th>
+                    <th>Curr RS</th>
+                    <th>ATH RS</th>
+                    <th style="width: 120px;">Stop Loss</th>
+                </tr>
+            </thead>
+            <tbody id="scannerResultsBody"></tbody>
+        `;
+
+        const tbody = table.querySelector('tbody');
+        results.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.dataset.symbol = row.symbol;
+            tr.innerHTML = `
+                <td><input type="checkbox" class="select-checkbox row-check" data-symbol="${row.symbol}" onchange="updateSelectedCount()"></td>
+                <td><b>${row.symbol}</b></td>
+                <td style="color: var(--primary-color); font-weight: 700;">${Number(row.new_ath_price).toFixed(2)}</td>
+                <td>${Number(row.trigger_price).toFixed(2)}</td>
+                <td><span class="${row.ath_outperformance === 'Y' ? 'badge-y' : (row.ath_outperformance === 'N' ? 'badge-n' : 'badge-na')}">${row.ath_outperformance}</span></td>
+                <td><span class="${row.green_candle === 'Y' ? 'badge-y' : 'badge-n'}">${row.green_candle}</span></td>
+                <td><span class="${row.close_gt_ath === 'Y' ? 'badge-y' : 'badge-n'}">${row.close_gt_ath}</span></td>
+                <td style="color: var(--text-muted); font-size: 0.9rem;">${row.current_rs !== null ? row.current_rs : '-'}</td>
+                <td style="color: var(--text-muted); font-size: 0.9rem;">${row.ath_rs !== null ? row.ath_rs : '-'}</td>
+                <td><input type="number" class="inline-input" step="0.05" placeholder="SL" data-field="stop_loss"></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        wrapper.appendChild(table);
+        area.appendChild(wrapper);
+
+        // Show bulk-add button
+        document.getElementById('btnBulkAdd').style.display = 'flex';
+        updateSelectedCount();
+    }
+
+    function toggleSelectAll(master) {
+        document.querySelectorAll('.row-check').forEach(cb => {
+            cb.checked = master.checked;
+        });
+        updateSelectedCount();
+    }
+
+    function updateSelectedCount() {
+        const checked = document.querySelectorAll('.row-check:checked').length;
+        const total = document.querySelectorAll('.row-check').length;
+        const countEl = document.getElementById('selectedCount');
+        countEl.textContent = checked > 0 ? `${checked} of ${total} selected` : `${total} stocks found`;
+    }
+
+    // ====================== BULK ADD ======================
+    async function bulkAddSelected() {
+        const checkedBoxes = document.querySelectorAll('.row-check:checked');
+        if (checkedBoxes.length === 0) {
+            showToast('No stocks selected. Check the boxes first.', 'warning');
+            return;
+        }
+
+        // --- DASHBOARD OVERWRITE CHECK ---
+        try {
+            const countRes = await fetch('/api/dashboard/stock-count');
+            const countData = await countRes.json();
+            if (countData.count > 0) {
+                const proceed = confirm(`⚠️ WARNING: There are already ${countData.count} stocks on your Dashboard.\n\nPushing these new ATH hits without clearing the dashboard first may lead to partial pushes or a mixed/cluttered dashboard.\n\nAre you absolutely sure you want to push these stocks now?`);
+                if (!proceed) {
+                    return; // User cancelled to go clear the dashboard
+                }
+            }
+        } catch (e) {
+            console.error("Failed to check dashboard count:", e);
+        }
+        // ---------------------------------
+
+        const btn = document.getElementById('btnBulkAdd');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Adding...';
+
+        const stocks = [];
+        checkedBoxes.forEach(cb => {
+            const row = cb.closest('tr');
+            const symbol = cb.dataset.symbol;
+            const stopLossInput = row.querySelector('[data-field="stop_loss"]');
+            const stopLoss = stopLossInput.value ? parseFloat(stopLossInput.value) : null;
+
+            // Extract values from the row cells
+            const cells = row.querySelectorAll('td');
+            stocks.push({
+                symbol: symbol,
+                trigger_price: parseFloat(cells[3].textContent),
+                ath_outperformance: cells[4].querySelector('span').textContent.trim(),
+                green_candle: cells[5].querySelector('span').textContent.trim(),
+                close_gt_ath: cells[6].querySelector('span').textContent.trim(),
+                stop_loss: stopLoss
+            });
+        });
+
+        try {
+            const response = await fetch('/api/bulk-add-portfolio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ stocks: stocks })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                // Remove successfully added rows from DOM
+                result.added.forEach(symbol => {
+                    const row = document.querySelector(`tr[data-symbol="${symbol}"]`);
+                    if (row) {
+                        row.style.transition = 'all 0.3s ease';
+                        row.style.opacity = '0';
+                        row.style.transform = 'translateX(30px)';
+                        setTimeout(() => row.remove(), 300);
+                    }
+                });
+
+                // Build the toast message
+                let msg = `✅ ${result.added_count} stock(s) added to Dashboard!`;
+                if (result.duplicates.length > 0) {
+                    msg += ` ⚠️ Duplicates skipped: ${result.duplicates.join(', ')}`;
+                    showToast(msg, 'warning');
+                } else {
+                    showToast(msg, 'success');
+                }
+
+                // Update count after animation
+                setTimeout(updateSelectedCount, 400);
+            } else {
+                showToast('❌ Error: ' + (result.error || 'Failed to add stocks.'), 'error');
+            }
+        } catch (e) {
+            showToast('❌ Network error during bulk add.', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '➕ Add Selected to Dashboard';
+        }
+    }
+
+    // ====================== TOAST ======================
+    function showToast(message, type = 'success') {
+        const existing = document.querySelectorAll('.toast');
+        existing.forEach(t => t.remove());
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+    }
+
+    // ====================== LEGACY SCANNER (Existing) ======================
+    let pollInterval = null;
+
+    async function runDailyScan() {
+        const btn = document.getElementById('btnOldDailyScan');
+        const status = document.getElementById('statusText');
+        btn.disabled = true;
+        status.innerText = "Initiating legacy scan...";
+        document.getElementById('progressContainer').style.display = 'block';
+
+        try {
+            const response = await fetch('/api/ath/run-daily', { method: 'POST' });
+            const data = await response.json();
+            if (data.status === 'success') {
+                pollInterval = setInterval(pollStatus, 1000);
+            } else {
+                status.innerText = "Error: " + data.message;
+                btn.disabled = false;
+            }
+        } catch (e) {
+            status.innerText = "Network Error";
+            btn.disabled = false;
+        }
+    }
+
+    async function pollStatus() {
+        try {
+            const res = await fetch('/api/ath/status');
+            const status = await res.json();
+            document.getElementById('progressLabel').innerText = status.message || "Running...";
+            let percent = 0;
+            if (status.total > 0) {
+                percent = Math.round((status.progress / status.total) * 100);
+            }
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressPercent').innerText = percent + '%';
+
+            if (!status.running) {
+                clearInterval(pollInterval);
+                document.getElementById('btnOldDailyScan').disabled = false;
+                document.getElementById('statusText').innerText = "Legacy Scan Complete ✅";
+                document.getElementById('progressBar').style.background = 'var(--primary-color)';
+
+                if (status.results && status.results.length > 0) {
+                    renderLegacyResults(status.results);
+                } else {
+                    fetchTodaysResults();
+                }
+            }
+        } catch (e) { /* pass */ }
+    }
+
+    async function fetchTodaysResults() {
+        const res = await fetch('/api/ath/todays-results');
+        const data = await res.json();
+        renderLegacyResults(data);
+    }
+
+    function renderLegacyResults(results) {
+        const area = document.getElementById('resultsArea');
+        area.innerHTML = '';
+        if (!results || results.length === 0) {
+            area.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No new ATHs found (legacy scan).</div>';
+            return;
+        }
+        let html = '<table class="results-table"><thead><tr><th>Symbol</th><th>Previous ATH</th><th>New ATH Price</th><th>% Gain</th></tr></thead><tbody>';
+        results.forEach(row => {
+            html += `<tr>
+                <td><b>${row.symbol}</b></td>
+                <td>${row.prev_ath ? row.prev_ath.toFixed(2) : '-'}</td>
+                <td style="color: var(--primary-color); font-weight: bold;">${row.new_ath.toFixed(2)}</td>
+                <td><span class="badge-y">+${row.outperformance || 0}%</span></td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        area.innerHTML = html;
+    }
+
+    async function runRefresh() {
+        if (!confirm("This will re-download full history for ALL tracked stocks. It may take several minutes. Continue?")) return;
+        const btn = document.getElementById('btnRefresh');
+        const status = document.getElementById('statusText');
+        btn.disabled = true;
+        status.innerText = "Initiating deep refresh...";
+        document.getElementById('progressContainer').style.display = 'block';
+
+        try {
+            const response = await fetch('/api/ath/run-refresh', { method: 'POST' });
+            const data = await response.json();
+            if (data.status === 'success') {
+                pollInterval = setInterval(pollStatus, 1000);
+            } else {
+                status.innerText = "Error: " + data.message;
+                btn.disabled = false;
+            }
+        } catch (e) {
+            status.innerText = "Network Error";
+            btn.disabled = false;
+        }
+    }
+
+    // --- TAB LOGIC ---
+    function openTab(tabName) {
+        document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+        document.getElementById(`tab-${tabName}`).classList.add('active');
+        const btns = document.querySelectorAll('.tab-btn');
+        if (tabName === 'scanner') btns[0].classList.add('active');
+        else btns[1].classList.add('active');
+        if (tabName === 'database') loadDatabase();
+    }
+
+    // --- DATABASE MANAGEMENT LOGIC ---
+    let fullDbData = [];
+
+    async function loadDatabase() {
+        const tbody = document.getElementById('dbTableBody');
+        if (fullDbData.length > 0) return;
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading...</td></tr>';
+
+        try {
+            const res = await fetch('/api/ath/all-data');
+            const json = await res.json();
+            fullDbData = json.data;
+            renderDatabase(fullDbData);
+        } catch (e) {
+            console.error("DB Load Error:", e);
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:red;">Failed to load data: ${e.message || e.toString()}</td></tr>`;
+        }
+    }
+
+    function renderDatabase(data) {
+        const tbody = document.getElementById('dbTableBody');
+        tbody.innerHTML = '';
+        if (data.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No records found.</td></tr>';
+            return;
+        }
+        data.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><b>${row.symbol}</b> <small style="color:#888;">${row.exchange}</small></td>
+                <td>
+                    <span id="price_txt_${row.symbol}">${row.ath_price.toFixed(2)}</span>
+                    <input type="number" step="0.05" class="editable-input" id="price_in_${row.symbol}" value="${row.ath_price}" style="display:none;">
+                </td>
+                <td>
+                    <span id="date_txt_${row.symbol}">${row.ath_date || '-'}</span>
+                    <input type="date" class="editable-input" id="date_in_${row.symbol}" value="${row.ath_date || ''}" style="display:none;">
+                </td>
+                <td style="font-size:0.85em; color:#666;">${new Date(row.last_updated * 1000).toLocaleString()}</td>
+                <td>
+                    <button class="edit-btn" id="btn_edit_${row.symbol}" onclick="editRecord('${row.symbol}')" style="padding:4px 8px; font-size:0.85em;">✏️ Edit</button>
+                    <button class="btn-primary" id="btn_save_${row.symbol}" onclick="saveRecord('${row.symbol}')" style="display:none; padding:4px 8px; font-size:0.85em; background-color: var(--success-color);">💾 Save</button>
+                    <button class="btn-refresh" id="btn_cancel_${row.symbol}" onclick="cancelEdit('${row.symbol}')" style="display:none; padding:4px 8px; font-size:0.85em;">❌</button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function searchDatabase() {
+        const query = document.getElementById('dbSearch').value.toUpperCase();
+        const filtered = fullDbData.filter(d => d.symbol.includes(query));
+        renderDatabase(filtered);
+    }
+
+    function editRecord(symbol) {
+        document.getElementById(`price_txt_${symbol}`).style.display = 'none';
+        document.getElementById(`date_txt_${symbol}`).style.display = 'none';
+        document.getElementById(`price_in_${symbol}`).style.display = 'block';
+        document.getElementById(`date_in_${symbol}`).style.display = 'block';
+        document.getElementById(`btn_edit_${symbol}`).style.display = 'none';
+        document.getElementById(`btn_save_${symbol}`).style.display = 'inline-block';
+        document.getElementById(`btn_cancel_${symbol}`).style.display = 'inline-block';
+    }
+
+    function cancelEdit(symbol) {
+        document.getElementById(`price_txt_${symbol}`).style.display = 'inline';
+        document.getElementById(`date_txt_${symbol}`).style.display = 'inline';
+        document.getElementById(`price_in_${symbol}`).style.display = 'none';
+        document.getElementById(`date_in_${symbol}`).style.display = 'none';
+        document.getElementById(`btn_edit_${symbol}`).style.display = 'inline-block';
+        document.getElementById(`btn_save_${symbol}`).style.display = 'none';
+        document.getElementById(`btn_cancel_${symbol}`).style.display = 'none';
+    }
+
+    async function saveRecord(symbol) {
+        const newPrice = document.getElementById(`price_in_${symbol}`).value;
+        const newDate = document.getElementById(`date_in_${symbol}`).value;
+        try {
+            const res = await fetch('/api/ath/update-record', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbol: symbol, ath_price: newPrice, ath_date: newDate })
+            });
+            const json = await res.json();
+            if (json.success) {
+                const idx = fullDbData.findIndex(d => d.symbol === symbol);
+                if (idx !== -1) {
+                    fullDbData[idx].ath_price = parseFloat(newPrice);
+                    fullDbData[idx].ath_date = newDate;
+                    fullDbData[idx].last_updated = Date.now() / 1000;
+                }
+                renderDatabase(fullDbData.filter(d => d.symbol.includes(document.getElementById('dbSearch').value.toUpperCase())));
+            } else {
+                alert('Error: ' + json.error);
+            }
+        } catch (e) {
+            alert('Network error saving record.');
+        }
+    }
+
+    async function syncAllChanges() {
+        if (!confirm("This will push all records currently in the table to the backend. Continue?")) return;
+        try {
+            const res = await fetch('/api/ath/bulk-update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ records: fullDbData })
+            });
+            const json = await res.json();
+            if (json.success) {
+                alert('✅ All changes synchronized to backend successfully!');
+            } else {
+                alert('❌ Sync failed: ' + json.error);
+            }
+        } catch (e) {
+            alert('Network error during sync.');
+        }
+    }
+
+</script>
+{% endblock %}

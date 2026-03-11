@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+
+{% block title %}Sector Analytics{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 1600px; margin: 0 auto; padding: 20px;">
+    <div class="page-header mb-4">
+        <h1 class="display-4">📊 Sector Scoring & Analytics</h1>
+        <p class="text-muted">Structural sector-level intelligence for allocation decisions</p>
+    </div>
+
+    <!-- WEIGHTING TOGGLE -->
+    <div class="card glass-card mb-4 p-3">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <label class="form-label fw-bold">Weighting Method:</label>
+                <div class="btn-group" role="group">
+                    <a href="?weight=market_cap"
+                        class="btn btn-{{ 'primary' if weight_type == 'market_cap' else 'outline-primary' }}">
+                        Market-Cap Weighted
+                    </a>
+                    <a href="?weight=equal"
+                        class="btn btn-{{ 'primary' if weight_type == 'equal' else 'outline-primary' }}">
+                        Equal Weighted
+                    </a>
+                </div>
+            </div>
+
+            <div>
+                <a href="{{ url_for('export_sectors_csv', weight=weight_type) }}" class="btn btn-success">
+                    <i class="fas fa-download"></i> Export CSV
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCORE VS PERFORMANCE SCATTER PLOT -->
+    <div class="card glass-card mb-4 p-4">
+        <h5 class="fw-bold mb-3">Score vs. Performance Matrix (12-Month View)</h5>
+        <canvas id="sectorScatter" width="400" height="200"></canvas>
+        <div class="text-muted mt-2" style="font-size: 0.85em;">
+            <strong>Quadrants:</strong>
+            <span class="badge bg-success">Leaders</span> (High Score, High Return) |
+            <span class="badge bg-info">Potential</span> (High Score, Low Return) |
+            <span class="badge bg-warning">Caution</span> (Low Score, High Return) |
+            <span class="badge bg-danger">Avoid</span> (Low Score, Low Return)
+        </div>
+    </div>
+
+    <!-- SECTOR RANKING TABLE -->
+    <div class="card glass-card p-4">
+        <h5 class="fw-bold mb-3">Sector Rankings</h5>
+        <div class="table-responsive">
+            <table class="table table-hover table-sm">
+                <thead class="bg-light sticky-header">
+                    <tr>
+                        <th>Rank</th>
+                        <th>Sector</th>
+                        <th class="text-end sortable" data-sort="overall_score">Overall Score</th>
+                        <th class="text-end sortable" data-sort="growth_score">Growth</th>
+                        <th class="text-end sortable" data-sort="quality_score">Quality</th>
+                        <th class="text-end sortable" data-sort="value_score">Value</th>
+                        <th class="text-end sortable" data-sort="tech_score">Tech</th>
+                        <th class="text-end sortable" data-sort="momentum">Momentum</th>
+                        <th class="text-end" title="Beta vs Nifty 500">Beta</th>
+                        <th class="text-end" title="Sharpe Ratio">Sharpe</th>
+                        <th class="text-end"># Stocks</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rankings %}
+                    <tr class="sector-row" data-sector="{{ row.sector }}" style="cursor: pointer;">
+                        <td class="fw-bold">{{ loop.index }}</td>
+                        <td class="fw-bold text-primary">{{ row.sector }}</td>
+                        <td class="text-end fw-bold" style="color: {{ score_color(row.overall_score) }}">
+                            {{ "%.1f"|format(row.overall_score) }}
+                        </td>
+                        <td class="text-end">{{ "%.1f"|format(row.growth_score) }}</td>
+                        <td class="text-end">{{ "%.1f"|format(row.quality_score) }}</td>
+                        <td class="text-end">{{ "%.1f"|format(row.value_score) }}</td>
+                        <td class="text-end">{{ "%.1f"|format(row.tech_score) }}</td>
+                        <td class="text-end">
+                            <span class="badge {{ 'bg-success' if row.momentum > 0 else 'bg-danger' }}">
+                                {{ "%+.1f"|format(row.momentum) if row.momentum else 'N/A' }}
+                            </span>
+                        </td>
+                        <td class="text-end">{{ "%.2f"|format(row.beta) if row.beta else '-' }}</td>
+                        <td class="text-end">{{ "%.2f"|format(row.sharpe_ratio) if row.sharpe_ratio else '-' }}</td>
+                        <td class="text-end text-muted">{{ row.num_companies }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    .sortable {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .sortable:hover {
+        background: #f8f9fa;
+    }
+
+    .sector-row:hover {
+        background: #f1f5f9;
+        transform: scale(1.01);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
+    .sticky-header th {
+        position: sticky;
+        top: 0;
+        background: #f8fafc;
+        z-index: 10;
+        box-shadow: 0 2px 2px -1px rgba(0, 0, 0, 0.05);
+    }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Fetch scatter data and render chart
+    fetch('/api/sector-scatter-data?weight={{ weight_type }}')
+        .then(res => res.json())
+        .then(data => {
+            const ctx = document.getElementById('sectorScatter').getContext('2d');
+
+            // Define quadrants
+            const avgScore = data.reduce((sum, d) => sum + d.score, 0) / data.length;
+            const avgReturn = data.reduce((sum, d) => sum + d.return, 0) / data.length;
+
+            new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [{
+                        label: 'Sectors',
+                        data: data.map(d => ({ x: d.score, y: d.return, label: d.sector })),
+                        backgroundColor: data.map(d => {
+                            // Leaders: high score, high return
+                            if (d.score >= avgScore && d.return >= avgReturn) return '#10B981';
+                            // Potential: high score, low return
+                            if (d.score >= avgScore && d.return < avgReturn) return '#3B82F6';
+                            // Caution: low score, high return
+                            if (d.score < avgScore && d.return >= avgReturn) return '#F59E0B';
+                            // Avoid: low score, low return
+                            return '#EF4444';
+                        }),
+                        pointRadius: 8,
+                        pointHoverRadius: 12
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    const point = context.raw;
+                                    return `${point.label}: Score ${point.x.toFixed(1)}, Return ${point.y.toFixed(1)}%`;
+                                }
+                            }
+                        },
+                        annotation: {
+                            annotations: {
+                                line1: {
+                                    type: 'line',
+                                    xMin: avgScore,
+                                    xMax: avgScore,
+                                    borderColor: '#cbd5e1',
+                                    borderWidth: 2,
+                                    borderDash: [5, 5]
+                                },
+                                line2: {
+                                    type: 'line',
+                                    yMin: avgReturn,
+                                    yMax: avgReturn,
+                                    borderColor: '#cbd5e1',
+                                    borderWidth: 2,
+                                    borderDash: [5, 5]
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Sector Score' },
+                            min: 0,
+                            max: 100
+                        },
+                        y: {
+                            title: { display: true, text: '12-Month Relative Return (%)' }
+                        }
+                    },
+                    onClick: (event, elements) => {
+                        if (elements.length > 0) {
+                            const index = elements[0].index;
+                            const sector = data[index].sector;
+                            window.location.href = `/sectors/${encodeURIComponent(sector)}?weight={{ weight_type }}`;
+                        }
+                    }
+                }
+            });
+
+            // Add quadrant labels
+            const labels = [
+                { text: 'LEADERS', x: '75%', y: '10%', color: '#10B981' },
+                { text: 'POTENTIAL', x: '75%', y: '90%', color: '#3B82F6' },
+                { text: 'CAUTION', x: '10%', y: '10%', color: '#F59E0B' },
+                { text: 'AVOID', x: '10%', y: '90%', color: '#EF4444' }
+            ];
+            // Note: Canvas text labels would require custom plugin - simplified for now
+        });
+
+    // Table row click handler
+    document.querySelectorAll('.sector-row').forEach(row => {
+        row.addEventListener('click', function () {
+            const sector = this.dataset.sector;
+            window.location.href = `/sectors/${encodeURIComponent(sector)}?weight={{ weight_type }}`;
+        });
+    });
+
+    // Simple table sorting
+    document.querySelectorAll('.sortable').forEach(th => {
+        th.addEventListener('click', function () {
+            const table = this.closest('table');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const column = this.cellIndex;
+            const isAsc = this.classList.contains('asc');
+
+            rows.sort((a, b) => {
+                const aVal = parseFloat(a.cells[column].textContent) || 0;
+                const bVal = parseFloat(b.cells[column].textContent) || 0;
+                return isAsc ? bVal - aVal : aVal - bVal;
+            });
+
+            this.classList.toggle('asc');
+            rows.forEach(row => tbody.appendChild(row));
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}GO List - ATH Tracker{% endblock %}
+{% block content %}
+    <h2>Stocks with "GO" Signal</h2>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>Stock</th>
+                    <th>Category</th>
+                    <th>Rounding Price</th>
+                    <th>Stop Loss</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stock in stocks %}
+                <tr>
+                    <td><b>{{ stock.symbol }}</b></td>
+                    <td>{{ stock.category }}</td>
+                    <td>{{ stock.rounding }}</td>
+                    <td>{{ stock.stop_loss or 'N/A' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" style="text-align: center; padding: 40px;">No stocks have a "GO" signal right now.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}
