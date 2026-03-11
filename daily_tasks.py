@@ -6,7 +6,7 @@ import time
 import yfinance as yf
 import os
 
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tracker.db')
+DATABASE = os.environ.get('DATABASE_PATH', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tracker.db'))
 
 def get_db():
     conn = sqlite3.connect(DATABASE, timeout=30)

@@ -34,7 +34,7 @@ class AccessLogFilter(logging.Filter):
 logging.getLogger("werkzeug").addFilter(AccessLogFilter())
 
 # --- APP CONFIGURATION ---
-DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tracker.db')
+DATABASE = os.environ.get('DATABASE_PATH', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tracker.db'))
 AUDIT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'db_update_audit.log')
 print('Webapp DB path:', DATABASE)
 
