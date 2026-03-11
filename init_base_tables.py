@@ -4,9 +4,12 @@ Initialize all necessary database tables for the stock tracker app.
 
 import sqlite3
 
+import os
+
 def init_all_tables():
     """Create all required tables."""
-    conn = sqlite3.connect('ath_tracker.db')
+    db_path = os.environ.get('DATABASE_PATH', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tracker.db'))
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     # 1. Stock data table

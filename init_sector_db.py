@@ -7,11 +7,12 @@ Creates tables for:
 - Sector alerts configuration
 """
 
-import sqlite3
-from pathlib import Path
+import os
 
-def init_sector_tables(db_path='ath_tracker.db'):
+def init_sector_tables(db_path=None):
     """Initialize sector analytics tables."""
+    if db_path is None:
+        db_path = os.environ.get('DATABASE_PATH', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tracker.db'))
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     

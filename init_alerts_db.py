@@ -1,7 +1,9 @@
 import sqlite3
 
+import os
+
 def init_alerts_table():
-    db_path = 'tracker.db'
+    db_path = os.environ.get('DATABASE_PATH', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tracker.db'))
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
