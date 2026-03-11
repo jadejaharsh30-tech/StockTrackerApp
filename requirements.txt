@@ -9,3 +9,4 @@ numpy
 streamlit
 openpyxl
 werkzeug
+gunicorn
