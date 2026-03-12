@@ -1478,11 +1478,9 @@ def refresh_result_dates():
         flash('Error: API Token (PA_API_TOKEN) not configured in your WSGI file.', 'danger')
         return redirect(url_for('results_calendar'))
 
-    # Detect paths dynamically based on username
-    # Note: Using 'myenv' as per your previous screenshots
-    python_path = f"/home/{username}/.virtualenvs/myenv/bin/python" 
-    script_path = f"/home/{username}/StockTrackerApp/daily_tasks.py"
-    command_to_run = f"{python_path} {script_path}"
+    # PythonAnywhere API has a strict 80-character limit on the 'executable' field.
+    # We use a short helper script to stay within this limit.
+    command_to_run = f"bash ~/StockTrackerApp/run_pa.sh"
 
     # The PythonAnywhere API endpoint for starting a new console
     console_url = f'https://www.pythonanywhere.com/api/v0/user/{username}/consoles/'
