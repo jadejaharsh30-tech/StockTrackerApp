@@ -18,14 +18,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'tracker.db')
 BATCH_SIZE = 25
 
-# Global Progress Tracker (Simple In-Memory)
-SCAN_STATUS = {
-    'running': False,
-    'progress': 0,
-    'total': 0,
-    'message': 'Idle',
-    'results': [] 
-}
+# Scanner progress state (Persistent via DB)
+from scanner_status import ScannerStatusManager
+status_manager = ScannerStatusManager()
 
 class ATHScanner:
     def __init__(self, db_path=DB_PATH):
@@ -46,25 +41,25 @@ class ATHScanner:
         conn.close()
         return df
 
-    def run_daily_scan(self, progress_callback=None):
+    def run_daily_scan(self, progress_callback=None, user_id=None):
         """
         WEEKDAY MODE: Fast Batch Scan.
         Returns a list of NEW ATH hits.
         """
-        # Reset Global Status
-        SCAN_STATUS['running'] = True
-        SCAN_STATUS['progress'] = 0
-        SCAN_STATUS['message'] = "Initializing Scan..."
-        SCAN_STATUS['results'] = []
+        def update_status(progress, total, message, running=True):
+            if progress_callback:
+                progress_callback(progress, total, message)
+            if user_id:
+                status_manager.set_status(user_id, running, progress, total, message)
+
+        # Reset Status
+        update_status(0, 0, "Initializing Scan...")
         
         df_db = self.get_tracked_tickers()
         if df_db.empty:
             SCAN_STATUS['running'] = False
-            SCAN_STATUS['message'] = "No tickers found to scan."
-            return []
-
         total_tickers = len(df_db)
-        SCAN_STATUS['total'] = total_tickers
+        update_status(0, total_tickers, "Starting Scan...")
         
         print("\n" + "="*50)
         print(f"🚀 STARTING DAILY ATH SCAN: {total_tickers} Stocks")
@@ -88,8 +83,7 @@ class ATHScanner:
             batch = tickers_to_fetch[i : i + BATCH_SIZE]
             
             # Update Global Status
-            SCAN_STATUS['progress'] = processed_count
-            SCAN_STATUS['message'] = f"Processing batch {i//BATCH_SIZE + 1} ({processed_count}/{total_tickers})"
+            update_status(processed_count, total_tickers, f"Processing batch {i//BATCH_SIZE + 1} ({processed_count}/{total_tickers})")
             
             # --- MANUAL RETRY LOOP ---
             data = pd.DataFrame()
@@ -225,10 +219,7 @@ class ATHScanner:
             
             processed_count += len(batch)
             
-        SCAN_STATUS['running'] = False
-        SCAN_STATUS['progress'] = total_tickers
-        SCAN_STATUS['message'] = "Scan Complete"
-        SCAN_STATUS['results'] = new_ath_list
+        update_status(total_tickers, total_tickers, "Scan Complete", running=False)
         
         print("\n" + "="*50)
         print(f"✅ SCAN COMPLETE. Found {len(new_ath_list)} New ATHs.")
@@ -236,19 +227,22 @@ class ATHScanner:
         
         return new_ath_list
 
-    def run_weekend_refresh(self, progress_callback=None):
+    def run_weekend_refresh(self, progress_callback=None, user_id=None):
         """
         WEEKEND MODE: Deep Clean (Hybrid Strategy).
         """
-        # Reset Global Status
-        SCAN_STATUS['running'] = True
-        SCAN_STATUS['progress'] = 0
-        SCAN_STATUS['message'] = "Starting Deep Clean..."
-        SCAN_STATUS['results'] = []
+        def update_status(progress, total, message, running=True):
+            if progress_callback:
+                progress_callback(progress, total, message)
+            if user_id:
+                status_manager.set_status(user_id, running, progress, total, message)
+
+        # Reset Status
+        update_status(0, 0, "Starting Deep Clean...")
         
         df_db = self.get_tracked_tickers()
         total_tickers = len(df_db)
-        SCAN_STATUS['total'] = total_tickers
+        update_status(0, total_tickers, "Initializing Deep Clean...")
         
         print("\n" + "="*50)
         print(f"🧹 STARTING WEEKEND REFRESH: {total_tickers} Stocks")
@@ -260,8 +254,7 @@ class ATHScanner:
         for i, row in tqdm(df_db.iterrows(), total=total_tickers, desc="Refreshing History", unit="ticker"):
             
             # Update Status
-            SCAN_STATUS['progress'] = i + 1
-            SCAN_STATUS['message'] = f"Refreshing: {row['symbol']}"
+            update_status(i + 1, total_tickers, f"Refreshing: {row['symbol']}")
                 
             suffix = ".NS" if 'NSE' in str(row.get('exchange', 'NSE')).upper() else ".BO"
             full_ticker = f"{row['symbol']}{suffix}"
@@ -275,8 +268,7 @@ class ATHScanner:
                 
             time.sleep(0.2) # Rate limit
         
-        SCAN_STATUS['running'] = False
-        SCAN_STATUS['message'] = f"Deep Clean Complete. Updated {updated_count} stocks."
+        update_status(total_tickers, total_tickers, f"Deep Clean Complete. Updated {updated_count} stocks.", running=False)
         
         print("\n" + "="*50)
         print(f"✅ REFRESH COMPLETE. Synced {updated_count}/{total_tickers} stocks.")

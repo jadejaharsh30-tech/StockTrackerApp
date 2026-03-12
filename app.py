@@ -2915,7 +2915,7 @@ def export_sectors_csv():
         headers={'Content-Disposition': f'attachment; filename=sector_rankings_{weight_type}.csv'}
     )
 
-from ath_scanner import ATHScanner, SCAN_STATUS # Import Scanner Status
+from ath_scanner import ATHScanner # Import Scanner Status
 from scanner_engine import run_full_scan, get_profit_tracker_tickers, get_scan_results, init_scanning_results_table, promote_ath_eod
 import threading 
 
@@ -2929,18 +2929,18 @@ def ath_scanner():
 @login_required
 def run_daily_scan():
     """Trigger the fast daily scan in background."""
-    if SCAN_STATUS['running']:
+    current_status = status_manager.get_status(current_user.id)
+    if current_status['running']:
         return jsonify({'status': 'warning', 'message': 'Scan already in progress.'})
         
-    def task():
+    def task(user_id):
         scanner = ATHScanner()
         try:
-            scanner.run_daily_scan()
-        except:
-            SCAN_STATUS['running'] = False
-            SCAN_STATUS['message'] = "Error in background scan."
+            scanner.run_daily_scan(user_id=user_id)
+        except Exception as e:
+            status_manager.set_status(user_id, False, 0, 0, f"Error: {str(e)}")
             
-    thread = threading.Thread(target=task)
+    thread = threading.Thread(target=task, args=(current_user.id,))
     thread.daemon = True
     thread.start()
     
@@ -2950,7 +2950,7 @@ def run_daily_scan():
 @login_required
 def get_scan_status():
     """Poll for progress updates."""
-    return jsonify(SCAN_STATUS)
+    return jsonify(status_manager.get_status(current_user.id))
 
 @app.route('/api/ath/run-refresh', methods=['POST'])
 @login_required
@@ -2961,12 +2961,12 @@ def run_weekend_refresh():
         
     scanner = ATHScanner()
     
-    def task():
+    def task(user_id):
         try:
-            scanner.run_weekend_refresh()
+            scanner.run_weekend_refresh(user_id=user_id)
         except: pass
             
-    thread = threading.Thread(target=task)
+    thread = threading.Thread(target=task, args=(current_user.id,))
     thread.start()
     return jsonify({'status': 'success', 'message': 'Deep refresh started. Check terminal for progress.'})
 
@@ -3105,20 +3105,16 @@ def bulk_update_ath():
 
 # --- NEW ATH SCANNER (4-Strategy) ROUTES ---
 
-# Scanner progress state (separate from old SCAN_STATUS)
-SCANNER_STATUS = {
-    'running': False,
-    'progress': 0,
-    'total': 0,
-    'message': 'Idle',
-    'results': []
-}
+# Scanner progress state (Persistent via DB)
+from scanner_status import ScannerStatusManager
+status_manager = ScannerStatusManager()
 
 @app.route('/api/run-scanner', methods=['POST'])
 @login_required
 def run_new_scanner():
     """Trigger the new 4-strategy ATH scan in background (database-light)."""
-    if SCANNER_STATUS['running']:
+    current_status = status_manager.get_status(current_user.id)
+    if current_status['running']:
         return jsonify({'status': 'warning', 'message': 'Scanner already in progress.'})
 
     # Get tickers from profit_tracker for current user
@@ -3129,30 +3125,13 @@ def run_new_scanner():
     # Ensure staging table exists with new schema
     init_scanning_results_table()
 
-    def progress_callback(progress, total, message):
-        SCANNER_STATUS['progress'] = progress
-        SCANNER_STATUS['total'] = total
-        SCANNER_STATUS['message'] = message
-
-    def task():
-        SCANNER_STATUS['running'] = True
-        SCANNER_STATUS['progress'] = 0
-        SCANNER_STATUS['total'] = len(tickers)
-        SCANNER_STATUS['message'] = 'Starting...'
-        SCANNER_STATUS['results'] = []
+    def task(user_id):
         try:
-            results = run_full_scan(
-                tickers, 
-                progress_callback=progress_callback
-            )
-            SCANNER_STATUS['results'] = results
-            SCANNER_STATUS['message'] = f'Scan complete. {len(results)} ATH hits found.'
+            run_full_scan(tickers, user_id=user_id)
         except Exception as e:
-            SCANNER_STATUS['message'] = f'Scan error: {str(e)}'
-        finally:
-            SCANNER_STATUS['running'] = False
+            status_manager.set_status(user_id, False, 0, 0, f"Scan error: {str(e)}")
 
-    thread = threading.Thread(target=task)
+    thread = threading.Thread(target=task, args=(current_user.id,))
     thread.daemon = True
     thread.start()
 
@@ -3174,11 +3153,12 @@ def eod_promote():
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'EOD Sync failed: {str(e)}'})
 
+@app.route('/api/ath/status', methods=['GET'])
 @app.route('/api/scanner/status', methods=['GET'])
 @login_required
-def get_scanner_status():
-    """Poll for scanner progress updates."""
-    return jsonify(SCANNER_STATUS)
+def get_scanner_status_api():
+    """Poll for progress updates from DB."""
+    return jsonify(status_manager.get_status(current_user.id))
 
 @app.route('/api/scanner/results', methods=['GET'])
 @login_required

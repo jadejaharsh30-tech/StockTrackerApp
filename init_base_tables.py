@@ -54,6 +54,18 @@ def init_all_tables():
     )
     ''')
     
+    # 4. Scanner state table (to persist progress in multi-process environments)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS scanner_state (
+        user_id INTEGER PRIMARY KEY,
+        is_running BOOLEAN DEFAULT 0,
+        progress INTEGER DEFAULT 0,
+        total INTEGER DEFAULT 0,
+        message TEXT,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
     # Create indices
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_data_symbol ON stock_data(symbol)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_data_date ON stock_data(date)')

@@ -417,19 +417,28 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
 
 # ====================== MAIN SCAN ORCHESTRATOR ======================
 
-def run_full_scan(tickers, progress_callback=None):
+def run_full_scan(tickers, progress_callback=None, user_id=None):
     """
     Run the optimized full ATH scan using batch processing.
     
     Args:
         tickers: List of bare ticker symbols (no .NS)
         progress_callback: Optional fn(progress, total, message) for UI updates
+        user_id: Optional user_id to persist status in DB
     """
+    from scanner_status import ScannerStatusManager
+    status_manager = ScannerStatusManager()
+
     total = len(tickers)
     results = []
 
-    if progress_callback:
-        progress_callback(0, total, "Initializing scanner...")
+    def update_status(progress, total, message, running=True):
+        if progress_callback:
+            progress_callback(progress, total, message)
+        if user_id:
+            status_manager.set_status(user_id, running, progress, total, message)
+
+    update_status(0, total, "Initializing scanner...")
 
     # ── Phase 0: Safely clear old intraday tracking ──
     # Prevents stale data from bleeding into today's scan if EOD sync was skipped
@@ -443,14 +452,13 @@ def run_full_scan(tickers, progress_callback=None):
 
     # ── Phase 1: Sync new stocks into ath_tracking_table ──
     try:
-        sync_new_stocks_to_ath_tracker(tickers, progress_callback)
+        sync_new_stocks_to_ath_tracker(tickers, progress_callback=update_status)
     except Exception as e:
         logger.error(f"Sync failed: {e}")
 
     # ── Phase 2: Load Nifty once and Get current ATH Map ──
     try:
-        if progress_callback:
-            progress_callback(0, total, "Fetching Nifty index data...")
+        update_status(0, total, "Fetching Nifty index data...")
         nifty_series = fetch_nifty_live()
         ath_map = get_current_ath_map()
     except Exception as e:
@@ -466,8 +474,7 @@ def run_full_scan(tickers, progress_callback=None):
 
     for i, batch in enumerate(batches):
         processed_count = i * BATCH_SIZE
-        if progress_callback:
-            progress_callback(processed_count, total, f"Batch {i+1}/{len(batches)}: Downloading prices...")
+        update_status(processed_count, total, f"Batch {i+1}/{len(batches)}: Downloading prices...")
 
         # Add .NS suffix for batch download
         yf_symbols = [f"{s}.NS" for s in batch]
@@ -517,13 +524,11 @@ def run_full_scan(tickers, progress_callback=None):
 
     # ── Phase 3: In-depth 4-strategy analysis for potential hits ──
     total_hits = len(potential_hits)
-    if progress_callback:
-        progress_callback(total, total, f"Detected {total_hits} potential hits. Analyzing...")
+    update_status(total, total, f"Detected {total_hits} potential hits. Analyzing...")
 
     for i, (symbol, live_candle) in enumerate(potential_hits.items()):
         try:
-            if progress_callback:
-                progress_callback(total, total, f"Analyzing {symbol} ({i+1}/{total_hits})")
+            update_status(total, total, f"Analyzing {symbol} ({i+1}/{total_hits})")
             
             result = calculate_single_ticker(
                 symbol, live_candle, nifty_series, 
@@ -540,8 +545,7 @@ def run_full_scan(tickers, progress_callback=None):
     # Update today_ath for all hits
     update_today_ath(results)
 
-    if progress_callback:
-        progress_callback(total, total, f"Scan complete. {len(results)} verified ATH hits found.")
+    update_status(total, total, f"Scan complete. {len(results)} verified ATH hits found.", running=False)
 
     logger.info(f"Scan complete: {len(results)} hits found from {total} tickers.")
     return results
