@@ -7,6 +7,7 @@ Creates tables for:
 - Sector alerts configuration
 """
 
+import sqlite3
 import os
 
 def init_sector_tables(db_path=None):
