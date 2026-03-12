@@ -1471,7 +1471,7 @@ def refresh_result_dates():
     Triggers the daily_tasks.py script to run in the background
     using the PythonAnywhere API.
     """
-    username = os.environ.get('PA_USERNAME', 'jadejaharsh30-tech')
+    username = os.environ.get('PA_USERNAME', 'HarshrajJadeja')
     api_token = os.environ.get('PA_API_TOKEN')
 
     if not api_token:
@@ -1479,7 +1479,8 @@ def refresh_result_dates():
         return redirect(url_for('results_calendar'))
 
     # Detect paths dynamically based on username
-    python_path = f"/home/{username}/.virtualenvs/myenv/bin/python" # Based on your previous screenshots
+    # Note: Using 'myenv' as per your previous screenshots
+    python_path = f"/home/{username}/.virtualenvs/myenv/bin/python" 
     script_path = f"/home/{username}/StockTrackerApp/daily_tasks.py"
 
     # The PythonAnywhere API endpoint for starting a new console
