@@ -3175,9 +3175,9 @@ def get_scanner_results():
 @app.route('/api/dashboard/stock-count', methods=['GET'])
 @login_required
 def get_dashboard_stock_count():
-    """Returns the number of stocks currently in the dashboard 'stocks' table."""
+    """Returns the number of stocks currently in the dashboard 'stocks' table for the current user."""
     conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM stocks").fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM stocks WHERE user_id = ?", (current_user.id,)).fetchone()[0]
     return jsonify({'count': count})
 
 @app.route('/api/bulk-add-portfolio', methods=['POST'])
