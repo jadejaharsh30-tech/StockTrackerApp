@@ -1471,15 +1471,16 @@ def refresh_result_dates():
     Triggers the daily_tasks.py script to run in the background
     using the PythonAnywhere API.
     """
-    username = 'HarshrajJadeja' # Your PythonAnywhere username
+    username = os.environ.get('PA_USERNAME', 'jadejaharsh30-tech')
     api_token = os.environ.get('PA_API_TOKEN')
 
     if not api_token:
-        flash('Error: API Token not configured on the server.', 'danger')
+        flash('Error: API Token (PA_API_TOKEN) not configured in your WSGI file.', 'danger')
         return redirect(url_for('results_calendar'))
 
-    # The command to run your script
-    command_to_run = f"/home/{username}/.virtualenvs/my-app-env/bin/python /home/{username}/daily_tasks.py"
+    # Detect paths dynamically based on username
+    python_path = f"/home/{username}/.virtualenvs/myenv/bin/python" # Based on your previous screenshots
+    script_path = f"/home/{username}/StockTrackerApp/daily_tasks.py"
 
     # The PythonAnywhere API endpoint for starting a new console
     console_url = f'https://www.pythonanywhere.com/api/v0/user/{username}/consoles/'
