@@ -2685,6 +2685,52 @@ def history_search():
     
     return render_template('history_search.html', records=records, title=title, active_page='history')
 
+@app.route('/history/update-date', methods=['POST'])
+@login_required
+def update_history_date():
+    """Updates the log_date for all entries of a specific date."""
+    old_date = request.form.get('old_date')
+    new_date = request.form.get('new_date')
+
+    if not old_date or not new_date:
+        flash('Invalid date data provided.', 'danger')
+        return redirect(url_for('history'))
+
+    if old_date == new_date:
+        return redirect(url_for('history'))
+
+    conn = get_db()
+    try:
+        # 1. CHECK if new_date already exists for this user
+        existing = conn.execute(
+            "SELECT 1 FROM historical_log WHERE user_id = ? AND log_date = ? LIMIT 1",
+            (current_user.id, new_date)
+        ).fetchone()
+
+        if existing:
+            flash(f'Cannot change date to {new_date}: that date already has historical log entries. Merging dates is not allowed.', 'warning')
+            return redirect(url_for('history'))
+
+        # 2. UPDATE historical_log
+        conn.execute(
+            "UPDATE historical_log SET log_date = ? WHERE user_id = ? AND log_date = ?",
+            (new_date, current_user.id, old_date)
+        )
+
+        # 3. UPDATE watchlist reasons (optional but good for consistency)
+        # Some reasons in watchlist might mention the date (though currently they reference CMP vs Rounding)
+        # We also need to ensure watchlist entries themselves don't break, though they aren't date-keyed in the same way.
+
+        conn.commit()
+        flash(f'Successfully updated log date from {old_date} to {new_date}.', 'success')
+    except Exception as e:
+        conn.rollback()
+        flash(f'Error updating date: {e}', 'danger')
+    finally:
+        conn.close()
+
+    return redirect(url_for('history'))
+
 @app.route('/confirm-result-date-upload', methods=['POST'])
 @login_required
 def confirm_result_date_upload():

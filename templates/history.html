@@ -39,10 +39,29 @@
             {% for day in days %}
             <li
                 style="border-bottom: 1px solid rgba(0,0,0,0.05); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s;">
-                <a href="{{ url_for('history_detail', log_date=day.log_date) }}"
-                    style="text-decoration: none; color: var(--secondary-color); font-weight: 500; display: block; flex-grow: 1;">
-                    {{ day.log_date }}
-                </a>
+                <div id="display-{{ day.log_date }}"
+                    style="display: flex; align-items: center; flex-grow: 1; gap: 12px;">
+                    <a href="{{ url_for('history_detail', log_date=day.log_date) }}"
+                        style="text-decoration: none; color: var(--secondary-color); font-weight: 500;">
+                        {{ day.log_date }}
+                    </a>
+                    <button class="edit-btn" onclick="toggleEdit('{{ day.log_date }}')"
+                        style="padding: 4px 8px; font-size: 0.8em; background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); cursor: pointer; border-radius: 4px;">
+                        ✏️ Edit
+                    </button>
+                </div>
+
+                <form id="edit-form-{{ day.log_date }}" action="{{ url_for('update_history_date') }}" method="POST"
+                    style="display: none; align-items: center; flex-grow: 1; gap: 12px;">
+                    <input type="hidden" name="old_date" value="{{ day.log_date }}">
+                    <input type="date" name="new_date" value="{{ day.log_date }}" required
+                        style="padding: 4px 8px; border-radius: 4px; border: 1px solid var(--primary-color);">
+                    <button type="submit" class="edit-btn"
+                        style="padding: 4px 12px; font-size: 0.8em; background: var(--primary-color); color: white; border: none; border-radius: 4px;">Save</button>
+                    <button type="button" class="edit-btn" onclick="toggleEdit('{{ day.log_date }}')"
+                        style="padding: 4px 12px; font-size: 0.8em; background: #e5e7eb; color: #374151; border: none; border-radius: 4px;">Cancel</button>
+                </form>
+
                 <span class="history-badge"
                     style="background: var(--light-grey); color: var(--secondary-color); font-size: 0.8em; padding: 2px 8px; border-radius: 12px;">
                     {{ day.stock_count }} Entries
@@ -58,6 +77,21 @@
     </div>
     {% endfor %}
 </div>
+
+<script>
+    function toggleEdit(date) {
+        const display = document.getElementById(`display-${date}`);
+        const form = document.getElementById(`edit-form-${date}`);
+
+        if (display.style.display === 'none') {
+            display.style.display = 'flex';
+            form.style.display = 'none';
+        } else {
+            display.style.display = 'none';
+            form.style.display = 'flex';
+        }
+    }
+</script>
 
 <style>
     /* Hide default details marker */
