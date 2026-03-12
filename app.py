@@ -1482,6 +1482,7 @@ def refresh_result_dates():
     # Note: Using 'myenv' as per your previous screenshots
     python_path = f"/home/{username}/.virtualenvs/myenv/bin/python" 
     script_path = f"/home/{username}/StockTrackerApp/daily_tasks.py"
+    command_to_run = f"{python_path} {script_path}"
 
     # The PythonAnywhere API endpoint for starting a new console
     console_url = f'https://www.pythonanywhere.com/api/v0/user/{username}/consoles/'
