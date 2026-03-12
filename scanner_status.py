@@ -13,8 +13,18 @@ class ScannerStatusManager:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def set_status(self, user_id, running, progress=0, total=0, message="Idle"):
-        """Update scanner status in the database."""
+    _last_update_cache = {}
+
+    def set_status(self, user_id, running, progress=0, total=0, message="Idle", force=False):
+        """
+        Update scanner status in the database.
+        Throttled to once every 3 seconds unless force=True or running=False.
+        """
+        now = time.time()
+        if not force and running and user_id in self._last_update_cache:
+            if now - self._last_update_cache[user_id] < 3:
+                return # Throttle to reduce DB load on PythonAnywhere
+        
         conn = self._get_conn()
         try:
             conn.execute('''
@@ -28,6 +38,7 @@ class ScannerStatusManager:
                     last_updated=CURRENT_TIMESTAMP
             ''', (user_id, 1 if running else 0, progress, total, message))
             conn.commit()
+            self._last_update_cache[user_id] = now
         finally:
             conn.close()
 

@@ -299,7 +299,7 @@ def fetch_ticker_history_for_rs(symbol):
 
 # ====================== CALCULATIONS ======================
 
-def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price):
+def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, history_closes=None):
     """
     Run all 4 strategy calculations for a single ticker hit.
     
@@ -308,6 +308,7 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price):
         live_candle: dict with 'High', 'Close', 'PrevClose'
         nifty_series: Pre-fetched Nifty close series
         trigger_price: The previous_ath value (== trigger price)
+        history_closes: Pre-fetched 1y history closes
     
     Returns:
         dict with results, or None if data is insufficient
@@ -328,11 +329,11 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price):
     close_gt_ath = 'Y' if round(live_close, 2) > round(trigger_price, 2) else 'N'
 
     # 4. ATH Outperformance (Rolling RS calculation)
-    #    Fetch 1y of closes live from yfinance for this specific hit
-    history_closes = fetch_ticker_history_for_rs(symbol)
+    if history_closes is None or history_closes.empty:
+        # Fallback to single fetch only if batch failed
+        history_closes = fetch_ticker_history_for_rs(symbol)
     
     if history_closes is None or history_closes.empty:
-        # Can't calculate RS, but we still have the other 3 strategies
         return {
             'symbol': symbol,
             'new_ath_price': round(live_high, 2),
@@ -524,20 +525,47 @@ def run_full_scan(tickers, progress_callback=None, user_id=None):
 
     # ── Phase 3: In-depth 4-strategy analysis for potential hits ──
     total_hits = len(potential_hits)
-    update_status(total, total, f"Detected {total_hits} potential hits. Analyzing...")
+    update_status(total, total, f"Detected {total_hits} potential hits. Analyzing (Batch Fetching History)...")
 
-    for i, (symbol, live_candle) in enumerate(potential_hits.items()):
+    if total_hits > 0:
+        # Batch Fetch 1y history for all hits to avoid 1-by-1 overhead
+        hit_symbols = list(potential_hits.keys())
+        yf_hit_symbols = [f"{s}.NS" for s in hit_symbols]
         try:
-            update_status(total, total, f"Analyzing {symbol} ({i+1}/{total_hits})")
-            
-            result = calculate_single_ticker(
-                symbol, live_candle, nifty_series, 
-                trigger_price=live_candle['TriggerPrice']
-            )
-            if result:
-                results.append(result)
+            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=False, progress=False)
         except Exception as e:
-            logger.error(f"Analysis failed for {symbol}: {e}")
+            logger.error(f"Batch history fetch failed: {e}")
+            hist_data = pd.DataFrame()
+
+        for i, symbol in enumerate(hit_symbols):
+            try:
+                live_candle = potential_hits[symbol]
+                update_status(total, total, f"Analyzing {symbol} ({i+1}/{total_hits})")
+                
+                # Extract history for this specific ticker from the batch
+                history_closes = None
+                if not hist_data.empty:
+                    yf_sym = f"{symbol}.NS"
+                    if isinstance(hist_data.columns, pd.MultiIndex):
+                        if yf_sym in hist_data.columns.get_level_values(1):
+                            history_closes = hist_data['Close'][yf_sym].dropna()
+                    else:
+                        history_closes = hist_data['Close'].dropna()
+                    
+                    if history_closes is not None:
+                        history_closes.index = pd.to_datetime(history_closes.index).normalize()
+
+                result = calculate_single_ticker(
+                    symbol, live_candle, nifty_series, 
+                    trigger_price=live_candle['TriggerPrice'],
+                    history_closes=history_closes # Pass pre-fetched history
+                )
+                if result:
+                    results.append(result)
+            except Exception as e:
+                logger.error(f"Analysis failed for {symbol}: {e}")
+    else:
+        update_status(total, total, "No potential hits detected.")
 
     # Save to staging table
     save_scan_results(results)
