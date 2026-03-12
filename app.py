@@ -1471,32 +1471,36 @@ def refresh_result_dates():
     Triggers the daily_tasks.py script to run in the background
     using the PythonAnywhere API.
     """
-    username = os.environ.get('PA_USERNAME', 'HarshrajJadeja')
+    username = os.environ.get('PA_USERNAME', 'harshrajjadeja')
     api_token = os.environ.get('PA_API_TOKEN')
 
     if not api_token:
         flash('Error: API Token (PA_API_TOKEN) not configured in your WSGI file.', 'danger')
         return redirect(url_for('results_calendar'))
 
-    # PythonAnywhere API has a strict 80-character limit on the 'executable' field.
-    # We use a short helper script to stay within this limit.
-    command_to_run = f"bash ~/StockTrackerApp/run_pa.sh"
+    # Use the absolute path to the helper script as the executable
+    # This keeps the command string very short (well under 80 chars)
+    command_to_run = f"/home/{username}/StockTrackerApp/run_pa.sh"
 
     # The PythonAnywhere API endpoint for starting a new console
     console_url = f'https://www.pythonanywhere.com/api/v0/user/{username}/consoles/'
 
     try:
+        # Add a timeout to prevent 502 errors if the API is slow
         response = requests.post(
             console_url,
             headers={'Authorization': f'Token {api_token}'},
-            json={'executable': command_to_run}
+            json={'executable': command_to_run},
+            timeout=10
         )
         if response.status_code == 201:
-            flash('Background update process has been started. It may take several minutes to complete.', 'info')
+            flash('Background update process has been started! This console will run and then close automatically.', 'info')
         else:
             flash(f'Error starting update process: {response.text}', 'danger')
+    except requests.exceptions.Timeout:
+        flash('The request to PythonAnywhere API timed out, but the task might have started anyway. Check your "Consoles" tab.', 'warning')
     except Exception as e:
-        flash(f'An error occurred when trying to start the task: {e}', 'danger')
+        flash(f'An error occurred: {e}', 'danger')
 
     return redirect(url_for('results_calendar'))
 
