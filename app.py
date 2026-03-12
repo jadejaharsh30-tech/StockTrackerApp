@@ -1471,7 +1471,7 @@ def refresh_result_dates():
     Triggers the daily_tasks.py script to run in the background
     using the PythonAnywhere API.
     """
-    username = os.environ.get('PA_USERNAME', 'harshrajjadeja')
+    username = os.environ.get('PA_USERNAME', 'HarshrajJadeja')
     api_token = os.environ.get('PA_API_TOKEN')
 
     if not api_token:
