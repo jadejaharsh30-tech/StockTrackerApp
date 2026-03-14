@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+{% block title %}PMS Review Dashboard | Turtlewealth{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/fund_review.css') }}">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+
+<div class="container">
+    <h2>PMS Review Dashboard</h2>
+    <div class="pms-nav">
+        <div class="fund-switcher">
+            <button class="fund-btn active-gm" id="btn-gm" onclick="switchFund('gm')">Growth Mantra</button>
+            <button class="fund-btn" id="btn-wm" onclick="switchFund('wm')">Wealth Mantra</button>
+        </div>
+        <div class="screen-tabs">
+            <button class="screen-tab active" id="tab-entry" onclick="showScreen('entry')">Data Entry</button>
+            <button class="screen-tab" id="tab-dashboard" onclick="showScreen('dashboard')">Dashboard</button>
+            <button class="screen-tab" id="tab-history" onclick="showScreen('history')">History</button>
+            <button class="screen-tab" id="tab-trends" onclick="showScreen('trends')">Historical Trends</button>
+        </div>
+    </div>
+
+    <!-- SCREEN: ENTRY -->
+    <div class="screen visible" id="entry-screen">
+        <!-- Review Date -->
+        <div class="pms-card">
+            <div class="card-title">Review Session</div>
+            <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;">
+                <div style="flex:1;min-width:150px">
+                    <div class="field-label">Review Date (Friday)</div>
+                    <input type="date" class="pms-input" id="review-date">
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn-ghost" onclick="openManageModal()">⚙️ Manage List</button>
+                    <button class="btn-ghost" onclick="togglePasteArea()">📋 Paste Data</button>
+                    <label class="btn-ghost" style="cursor:pointer">📁 Upload Excel <input type="file"
+                            accept=".xlsx,.xls,.csv" id="excel-upload" style="display:none"
+                            onchange="handleExcelUpload(event)"></label>
+                    <button class="btn-ghost" onclick="exportExcel()">📤 Export Excel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Paste Area -->
+        <div id="paste-area" style="display:none">
+            <div class="pms-card">
+                <div class="card-title">Paste from Excel</div>
+                <p style="font-size:12px;color:#666;margin-bottom:10px;">Columns: Stock | Alloc% | RS Start | RS W1-W5 |
+                    Px Start | Px W1-W5 | ST (Above/Below)</p>
+                <textarea class="pms-input" id="paste-input" rows="5"
+                    placeholder="Paste tab-separated data..."></textarea>
+                <div style="display:flex;gap:10px;margin-top:12px">
+                    <button class="btn-primary btn-sm" style="font-size:13px;padding:8px 16px"
+                        onclick="parsePaste()">Import</button>
+                    <button class="btn-ghost" onclick="document.getElementById('paste-input').value=''">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nifty 500 Section -->
+        <div class="pms-card">
+            <div class="card-title">Nifty 500 Benchmark</div>
+            <div style="overflow-x:auto">
+                <table class="stock-table" style="min-width:700px">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Mth Start</th>
+                            <th>Week 1</th>
+                            <th>Week 2</th>
+                            <th>Week 3</th>
+                            <th>Week 4</th>
+                            <th>Week 5</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td
+                                style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--primary-color)">
+                                RS Rating</td>
+                            <td><input type="number" class="pms-input" id="niftyRsStart" step="0.1" placeholder="—">
+                            </td>
+                            <td><input type="number" class="pms-input" id="niftyRsW1" step="0.1" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyRsW2" step="0.1" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyRsW3" step="0.1" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyRsW4" step="0.1" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyRsW5" step="0.1" placeholder="—"></td>
+                        </tr>
+                        <tr>
+                            <td
+                                style="font-weight:700;font-size:12px;text-transform:uppercase;color:var(--primary-color)">
+                                Price</td>
+                            <td><input type="number" class="pms-input" id="niftyPxStart" step="0.01" placeholder="—">
+                            </td>
+                            <td><input type="number" class="pms-input" id="niftyPxW1" step="0.01" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyPxW2" step="0.01" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyPxW3" step="0.01" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyPxW4" step="0.01" placeholder="—"></td>
+                            <td><input type="number" class="pms-input" id="niftyPxW5" step="0.01" placeholder="—"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Stock Data Table -->
+        <div class="pms-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <div class="card-title" style="margin:0">Stock Data — <span id="entry-fund-label">Growth Mantra</span>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button class="btn-ghost" onclick="addStockRow()">+ Add Row</button>
+                    <button class="btn-ghost" style="color:var(--danger-color);border-color:var(--danger-color)"
+                        onclick="clearAllRows()">✕ Clear All</button>
+                </div>
+            </div>
+            <!-- Price Fetch Row -->
+            <div class="pms-card" style="padding:10px 16px;margin-bottom:12px;background:rgba(0,128,128,.04)">
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px">
+                    <strong style="white-space:nowrap">📥 Fetch Prices:</strong>
+                    <div class="fetch-row"><span>Start:</span><input type="date" id="fetch-date-start"><button
+                            class="btn-ghost btn-sm" onclick="fetchPrices('pxStart','fetch-date-start')">Go</button>
+                    </div>
+                    <div class="fetch-row"><span>W1:</span><input type="date" id="fetch-date-w1"><button
+                            class="btn-ghost btn-sm" onclick="fetchPrices('pxW1','fetch-date-w1')">Go</button></div>
+                    <div class="fetch-row"><span>W2:</span><input type="date" id="fetch-date-w2"><button
+                            class="btn-ghost btn-sm" onclick="fetchPrices('pxW2','fetch-date-w2')">Go</button></div>
+                    <div class="fetch-row"><span>W3:</span><input type="date" id="fetch-date-w3"><button
+                            class="btn-ghost btn-sm" onclick="fetchPrices('pxW3','fetch-date-w3')">Go</button></div>
+                    <div class="fetch-row"><span>W4:</span><input type="date" id="fetch-date-w4"><button
+                            class="btn-ghost btn-sm" onclick="fetchPrices('pxW4','fetch-date-w4')">Go</button></div>
+                    <div class="fetch-row"><span>W5:</span><input type="date" id="fetch-date-w5"><button
+                            class="btn-ghost btn-sm" onclick="fetchPrices('pxW5','fetch-date-w5')">Go</button></div>
+                </div>
+            </div>
+            <div class="stock-table-wrap">
+                <table class="stock-table" id="entry-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" style="width:30px">#</th>
+                            <th rowspan="2">Stock</th>
+                            <th rowspan="2">Alloc %</th>
+                            <th colspan="6" class="col-group-header">RS Rating</th>
+                            <th colspan="6" class="col-group-header">Price (₹)</th>
+                            <th rowspan="2">ST</th>
+                            <th rowspan="2" style="width:30px"></th>
+                        </tr>
+                        <tr>
+                            <th class="col-group-sep">Start</th>
+                            <th>W1</th>
+                            <th>W2</th>
+                            <th>W3</th>
+                            <th>W4</th>
+                            <th>W5</th>
+                            <th class="col-group-sep">Start</th>
+                            <th>W1</th>
+                            <th>W2</th>
+                            <th>W3</th>
+                            <th>W4</th>
+                            <th>W5</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stock-tbody"></tbody>
+                </table>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+                <button class="btn-ghost" onclick="saveEntryDraft()">💾 Save Draft</button>
+                <button class="btn-primary" onclick="generateDashboard()">Generate Dashboard →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: DASHBOARD -->
+    <div class="screen" id="dashboard-screen">
+        <div id="dash-empty" style="text-align:center;padding:60px 20px">
+            <div style="font-size:48px;opacity:.5;margin-bottom:16px">📊</div>
+            <h3 style="color:var(--secondary-color);margin-bottom:8px">No Dashboard Generated Yet</h3>
+            <p style="color:#666;margin-bottom:20px">Enter your stock data and click Generate Dashboard.</p>
+            <button class="btn-ghost" onclick="showScreen('entry')">← Go to Data Entry</button>
+        </div>
+        <div id="dash-content" style="display:none">
+            <div class="dash-header">
+                <div style="display:flex;align-items:center;gap:16px">
+                    <div class="dash-fund-badge" id="dash-fund-badge"></div>
+                    <div>
+                        <div class="dash-date" id="dash-date-label"></div>
+                        <div style="font-size:12px;color:var(--secondary-color)" id="dash-period-sub"></div>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div class="period-toggle">
+                        <button class="period-btn" id="btn-mtd" onclick="setPeriod('mtd')">MTD</button>
+                        <button class="period-btn active" id="btn-weekly" onclick="setPeriod('weekly')">Weekly</button>
+                    </div>
+                    <button class="btn-ghost" onclick="showScreen('entry')">← Edit</button>
+                    <button class="btn-ghost"
+                        style="background:var(--success-color);color:white;border-color:var(--success-color)"
+                        onclick="saveSnapshotToDB()">💾 Save</button>
+                    <button class="btn-ghost"
+                        onclick="document.getElementById('info-modal').classList.add('visible')">ℹ️ Info</button>
+                </div>
+            </div>
+            <!-- MTD Panel -->
+            <div id="panel-mtd" style="display:none">
+                <div class="pms-card">
+                    <div class="card-title">Month-to-Date Overview</div>
+                    <div class="stock-table-wrap">
+                        <table class="stock-table" id="mtd-table"></table>
+                    </div>
+                </div>
+            </div>
+            <!-- Weekly Panel -->
+            <div id="panel-weekly">
+                <div class="sub-tabs">
+                    <button class="sub-tab active" onclick="showSubTab('wk-tab1')">RS Review & Supertrend</button>
+                    <button class="sub-tab" onclick="showSubTab('wk-tab2')">Outperformers & Underperformers</button>
+                </div>
+                <div class="sub-panel visible" id="wk-tab1">
+                    <div class="split-panel">
+                        <div id="wk-rs-review"></div>
+                        <div id="wk-st-status"></div>
+                    </div>
+                </div>
+                <div class="sub-panel" id="wk-tab2">
+                    <div id="wk-performers"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: HISTORY -->
+    <div class="screen" id="history-screen">
+        <div class="pms-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+                <div class="card-title" style="margin:0">Database Snapshots</div>
+                <div class="period-toggle">
+                    <button class="period-btn active" id="hf-all" onclick="setHistoryFilter('all')">All</button>
+                    <button class="period-btn" id="hf-gm" onclick="setHistoryFilter('gm')"
+                        style="color:var(--gm)">GM</button>
+                    <button class="period-btn" id="hf-wm" onclick="setHistoryFilter('wm')"
+                        style="color:var(--wm)">WM</button>
+                </div>
+            </div>
+            <div id="db-history-list">
+                <div style="text-align:center;padding:40px;color:#666">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: TRENDS -->
+    <div class="screen" id="trends-screen">
+        <div class="pms-card">
+            <div class="card-title">Historical Trends</div>
+            <p style="font-size:13px;color:#666;margin-bottom:20px">Analytics derived from your saved snapshots.
+                Requires ≥2 snapshots.</p>
+            <div style="margin-bottom:16px;display:flex;gap:8px;align-items:center">
+                <label class="field-label" style="margin:0">Fund:</label>
+                <select class="pms-input" id="trend-fund" style="width:auto" onchange="loadTrends()">
+                    <option value="gm">Growth Mantra</option>
+                    <option value="wm">Wealth Mantra</option>
+                </select>
+            </div>
+        </div>
+        <div class="trend-grid">
+            <div class="chart-card">
+                <h4>Fund Return Over Time</h4><canvas id="chart-return"></canvas>
+            </div>
+            <div class="chart-card">
+                <h4>Fund vs Nifty 500</h4><canvas id="chart-vs-nifty"></canvas>
+            </div>
+            <div class="chart-card">
+                <h4>RS Strength Trend</h4><canvas id="chart-rs-strength"></canvas>
+            </div>
+            <div class="chart-card">
+                <h4>Supertrend Health</h4><canvas id="chart-st-health"></canvas>
+            </div>
+        </div>
+        <div class="chart-card">
+            <h4>Stock Spotlight</h4>
+            <select class="pms-input" id="spotlight-stock" style="width:auto;margin-bottom:16px"
+                onchange="renderSpotlight()"></select>
+            <canvas id="chart-spotlight"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Modal -->
+<div class="modal-overlay" id="manage-modal">
+    <div class="modal">
+        <h3 style="margin-bottom:10px">Manage List — <span id="manage-fund-name">Growth Mantra</span></h3>
+        <p style="font-size:13px;color:#666;margin-bottom:16px">Add or remove stocks.</p>
+        <div id="manage-stock-list" style="max-height:300px;overflow-y:auto;margin-bottom:16px"></div>
+        <button class="btn-ghost" onclick="addManagedStock()">+ Add Ticker</button>
+        <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+            <button class="btn-ghost" onclick="closeModal('manage-modal')">Cancel</button>
+            <button class="btn-primary" style="font-size:13px;padding:8px 16px"
+                onclick="saveManageModal()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Excel Column Picker Modal -->
+<div class="modal-overlay" id="excel-modal">
+    <div class="modal">
+        <h3 style="margin-bottom:10px">Select Columns to Import</h3>
+        <p style="font-size:13px;color:#666;margin-bottom:16px">Check the columns you want to import. Stock is always
+            included.</p>
+        <div id="excel-col-list" style="max-height:400px;overflow-y:auto;margin-bottom:16px"></div>
+        <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:20px">
+            <button class="btn-ghost" onclick="closeModal('excel-modal')">Cancel</button>
+            <button class="btn-primary" style="font-size:13px;padding:8px 16px"
+                onclick="importSelectedColumns()">Import</button>
+        </div>
+    </div>
+</div>
+
+<!-- Info Modal -->
+<div class="modal-overlay" id="info-modal">
+    <div class="modal" style="max-width:750px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+            <h3 style="margin:0">ℹ️ How This Dashboard Works</h3>
+            <button class="btn-ghost" onclick="closeModal('info-modal')" style="border:none;font-size:18px">✕</button>
+        </div>
+
+        <div style="font-size:14px;line-height:1.8;color:var(--primary-color)">
+
+            <h4
+                style="color:var(--accent);margin:20px 0 8px;border-bottom:1px solid var(--border-light);padding-bottom:6px">
+                📊 MTD (Month-to-Date) Section</h4>
+            <p>The MTD view provides a single, comprehensive table that tracks how each stock in your portfolio has
+                performed since the beginning of the current month. Here is what each column represents:</p>
+            <ul style="margin:8px 0 12px 20px">
+                <li><strong>RS Start</strong> — The Relative Strength (RS) Rating of the stock at the start of the
+                    month. RS Rating is a measure of how strongly a stock is performing relative to the broader market.
+                    A higher RS indicates stronger momentum.</li>
+                <li><strong>RS W1 through RS W5</strong> — The RS Rating recorded at the end of each successive week
+                    during the month. These cells are colour-coded: <span
+                        style="color:var(--green);font-weight:600">green</span> means the stock's RS has held steady or
+                    improved compared to its Month Start value, while <span
+                        style="color:var(--red);font-weight:600">red</span> means its RS has declined. This gives you a
+                    quick visual of whether a stock's relative momentum is strengthening or weakening over the course of
+                    the month.</li>
+                <li><strong>MTD Return</strong> — The percentage change in the stock's price from the Month Start to the
+                    latest available week. It is calculated as: <em>(Latest Week Price − Month Start Price) ÷ Month
+                        Start Price</em>. This tells you how much the stock has gained or lost in absolute price terms
+                    during the current month.</li>
+                <li><strong>Portfolio Return</strong> — The stock's contribution to your overall portfolio return,
+                    weighted by its allocation. It is calculated as: <em>MTD Return × Allocation %</em>. For example, if
+                    a stock has a 10% allocation and returned 5% MTD, its Portfolio Return contribution would be 0.50%.
+                    The total at the bottom sums up all individual contributions to give you the overall fund's weighted
+                    MTD return.</li>
+                <li><strong>Nifty 500 Benchmark</strong> — Shown as the last row, this is the MTD return of the Nifty
+                    500 index calculated the same way. Comparing your fund's total Portfolio Return to the Nifty 500's
+                    return tells you whether your fund is outperforming or underperforming the broader market benchmark.
+                </li>
+            </ul>
+            <p style="font-size:12px;color:var(--secondary-color)">💡 <em>You can click on any column header to sort the
+                    table by that column. By default, stocks are sorted by RS Start in descending order (strongest
+                    first).</em></p>
+
+            <h4
+                style="color:var(--accent);margin:24px 0 8px;border-bottom:1px solid var(--border-light);padding-bottom:6px">
+                📅 Weekly Section — Tab 1: RS Review & Supertrend</h4>
+
+            <p><strong>RS Review</strong> compares each stock's latest RS Rating against the Nifty 500's latest RS
+                Rating to classify them into two groups:</p>
+            <ul style="margin:8px 0 12px 20px">
+                <li><strong style="color:var(--green)">Strong</strong> — Stocks whose latest RS Rating is
+                    <em>higher</em> than the Nifty 500's latest RS Rating. These stocks are exhibiting stronger relative
+                    momentum than the market itself, meaning they are outpacing the index in terms of price strength.
+                </li>
+                <li><strong style="color:var(--red)">Weak</strong> — Stocks whose latest RS Rating is <em>equal to or
+                        lower</em> than the Nifty 500's latest RS Rating. These stocks are lagging behind the market's
+                    overall momentum.</li>
+            </ul>
+            <p>The allocation totals at the bottom of each side tell you what percentage of your portfolio is currently
+                in "Strong" versus "Weak" RS stocks. Ideally, a well-positioned portfolio should have the majority of
+                its allocation in the Strong category.</p>
+
+            <p style="margin-top:16px"><strong>Supertrend Status</strong> classifies each stock based on its position
+                relative to the Supertrend indicator (calculated using 15 & 4 parameters):</p>
+            <ul style="margin:8px 0 12px 20px">
+                <li><strong style="color:var(--green)">Above Supertrend</strong> — The stock's price is currently
+                    trading <em>above</em> its Supertrend level. This is generally considered a bullish signal,
+                    suggesting the stock is in an uptrend and has positive price momentum.</li>
+                <li><strong style="color:var(--red)">Below Supertrend</strong> — The stock's price is currently trading
+                    <em>below</em> its Supertrend level. This is generally considered a bearish signal, suggesting the
+                    stock may be in a downtrend or losing momentum.</li>
+            </ul>
+            <p>The allocation totals help you understand how much of your portfolio is in bullish versus bearish
+                territory according to this technical indicator.</p>
+
+            <h4
+                style="color:var(--accent);margin:24px 0 8px;border-bottom:1px solid var(--border-light);padding-bottom:6px">
+                📅 Weekly Section — Tab 2: Outperformers & Underperformers</h4>
+            <p>This tab combines the insights from both the RS Review and Supertrend Status to create a unified
+                classification of each stock's overall health:</p>
+            <ul style="margin:8px 0 12px 20px">
+                <li><strong style="color:var(--green)">Outperformers</strong> — Stocks that are <em>both</em> Strong in
+                    RS (beating the Nifty 500's RS) <em>and</em> Above their Supertrend. These are your best-positioned
+                    holdings — they have strong relative momentum and are in a confirmed uptrend.</li>
+                <li><strong style="color:var(--red)">Underperformers</strong> — Stocks that are <em>both</em> Weak in RS
+                    (lagging the Nifty 500's RS) <em>and</em> Below their Supertrend. These are your most concerning
+                    holdings — they are losing relative strength and are in a downtrend.</li>
+                <li><strong style="color:var(--neutral)">Neutral</strong> — Stocks that have mixed signals: either
+                    Strong RS but Below Supertrend, or Weak RS but Above Supertrend. These stocks are neither clearly
+                    outperforming nor underperforming and may warrant closer monitoring.</li>
+            </ul>
+            <p>Reviewing the allocation split across these three buckets helps you assess the overall health of your
+                portfolio at a glance. A strong portfolio will have a high allocation in Outperformers and minimal
+                allocation in Underperformers.</p>
+
+            <h4
+                style="color:var(--accent);margin:24px 0 8px;border-bottom:1px solid var(--border-light);padding-bottom:6px">
+                📈 Historical Trends</h4>
+            <p>The Historical Trends section analyses your previously saved snapshots to reveal patterns over time. It
+                requires at least two saved snapshots to generate meaningful charts:</p>
+            <ul style="margin:8px 0 12px 20px">
+                <li><strong>Fund Return Over Time</strong> — Plots your fund's weighted MTD return from each saved
+                    snapshot, showing the trajectory of your portfolio performance across review dates.</li>
+                <li><strong>Fund vs Nifty 500</strong> — A side-by-side comparison of your fund's return against the
+                    Nifty 500 benchmark over time. This helps you track whether you are consistently beating or trailing
+                    the market.</li>
+                <li><strong>RS Strength Trend</strong> — Shows the proportion of your portfolio allocation classified as
+                    "Strong" versus "Weak" RS over time. A healthy trend would show an increasing share of Strong
+                    allocation.</li>
+                <li><strong>Supertrend Health</strong> — Tracks the split between "Above" and "Below" Supertrend
+                    allocation over time. This reveals whether your portfolio's overall trend positioning is improving
+                    or deteriorating.</li>
+                <li><strong>Stock Spotlight</strong> — Select any individual stock from the dropdown to view its RS
+                    Rating trajectory across all saved snapshots. Useful for tracking a specific holding's momentum over
+                    time.</li>
+            </ul>
+
+            <h4
+                style="color:var(--accent);margin:24px 0 8px;border-bottom:1px solid var(--border-light);padding-bottom:6px">
+                💾 Data Entry Features</h4>
+            <ul style="margin:8px 0 12px 20px">
+                <li><strong>Save Draft</strong> — Saves your current data entry (stock rows, Nifty values, review date)
+                    to your browser's local storage. This is a quick local backup that auto-restores when you return to
+                    the page. It does <em>not</em> save to the database.</li>
+                <li><strong>Save to Database</strong> — Permanently stores the generated dashboard snapshot in the
+                    database. These snapshots appear in the History tab and power the Historical Trends charts.</li>
+                <li><strong>Fetch Prices</strong> — Automatically retrieves stock closing prices from Yahoo Finance for
+                    a given date, so you don't have to enter them manually.</li>
+                <li><strong>Export / Upload Excel</strong> — Export downloads your current data as an Excel file. Upload
+                    imports data from an Excel file. The formats are fully compatible — you can export, make edits in
+                    Excel, and re-upload seamlessly.</li>
+            </ul>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:20px">
+            <button class="btn-primary" style="font-size:13px;padding:8px 20px" onclick="closeModal('info-modal')">Got
+                it</button>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/fund_review.js') }}"></script>
+{% endblock %}

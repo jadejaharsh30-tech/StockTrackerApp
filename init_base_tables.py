@@ -28,6 +28,21 @@ def init_all_tables():
     )
     ''')
     
+
+    # PMS Review Dashboard Snapshots table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fund_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            fund TEXT NOT NULL,
+            review_date TEXT NOT NULL,
+            period TEXT NOT NULL DEFAULT 'weekly',
+            data_json TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
     # 2. Scoring history table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS scoring_history (

@@ -3154,6 +3154,127 @@ def bulk_update_ath():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+# --- PMS REVIEW DASHBOARD ROUTES ---
+@app.route('/fund-review')
+@login_required
+def fund_review():
+    """Render the PMS Review Dashboard integrated into the main app."""
+    return render_template('fund_review.html')
+
+@app.route('/api/fund-review/fetch-prices', methods=['POST'])
+@login_required
+def fetch_fund_prices():
+    """Fetch Close prices from yfinance for given symbols on a specific date."""
+    import yfinance as yf
+    from datetime import datetime, timedelta
+    
+    data = request.get_json()
+    if not data or 'symbols' not in data or 'date' not in data:
+        return jsonify({'error': 'Missing symbols or date'}), 400
+    
+    symbols = data['symbols']
+    target_date_str = data['date']  # "YYYY-MM-DD"
+    
+    try:
+        target_date = datetime.strptime(target_date_str, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+    
+    # Fetch a 7-day window around the target to handle weekends/holidays
+    start = (target_date - timedelta(days=5)).strftime('%Y-%m-%d')
+    end = (target_date + timedelta(days=2)).strftime('%Y-%m-%d')
+    
+    results = {}
+    errors = []
+    
+    # Add .NS suffix for NSE stocks
+    yf_symbols = [f"{s}.NS" for s in symbols]
+    
+    try:
+        df = yf.download(yf_symbols, start=start, end=end, group_by='ticker', progress=False)
+        
+        for i, sym in enumerate(symbols):
+            yf_sym = f"{sym}.NS"
+            try:
+                if len(yf_symbols) == 1:
+                    ticker_df = df
+                else:
+                    ticker_df = df[yf_sym]
+                
+                # Find the closest date on or before the target
+                valid = ticker_df[ticker_df.index <= target_date_str + ' 23:59:59']
+                if not valid.empty:
+                    close_val = valid['Close'].iloc[-1]
+                    results[sym] = round(float(close_val), 2)
+                else:
+                    errors.append(sym)
+            except Exception:
+                errors.append(sym)
+    except Exception as e:
+        return jsonify({'error': f'yfinance download failed: {str(e)}'}), 500
+    
+    return jsonify({'prices': results, 'errors': errors})
+
+@app.route('/api/fund-review/snapshots', methods=['GET', 'POST'])
+@login_required
+def manage_fund_snapshots():
+    """API for managing PMS Review snapshots in the database."""
+    conn = get_db()
+    
+    if request.method == 'GET':
+        fund_filter = request.args.get('fund', 'all')
+        if fund_filter == 'all':
+            rows = conn.execute(
+                'SELECT id, fund, review_date, period, data_json, created_at FROM fund_snapshots WHERE user_id = ? ORDER BY review_date DESC, created_at DESC',
+                (current_user.id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                'SELECT id, fund, review_date, period, data_json, created_at FROM fund_snapshots WHERE user_id = ? AND fund = ? ORDER BY review_date DESC, created_at DESC',
+                (current_user.id, fund_filter)
+            ).fetchall()
+        
+        return jsonify([dict(row) for row in rows])
+
+    elif request.method == 'POST':
+        data = request.get_json()
+        if not data or 'fund' not in data or 'review_date' not in data:
+            return jsonify({'error': 'Invalid payload'}), 400
+            
+        try:
+            # Upsert logic essentially - if a snapshot for the exact day exists, overwrite it, else insert newly
+            existing = conn.execute(
+                'SELECT id FROM fund_snapshots WHERE user_id = ? AND fund = ? AND review_date = ? AND period = ?',
+                (current_user.id, data['fund'], data['review_date'], data.get('period', 'weekly'))
+            ).fetchone()
+            
+            if existing:
+                conn.execute(
+                    'UPDATE fund_snapshots SET data_json = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?',
+                    (data['data_json'], existing['id'])
+                )
+            else:
+                conn.execute(
+                    'INSERT INTO fund_snapshots (user_id, fund, review_date, period, data_json) VALUES (?, ?, ?, ?, ?)',
+                    (current_user.id, data['fund'], data['review_date'], data.get('period', 'weekly'), data['data_json'])
+                )
+            conn.commit()
+            return jsonify({'status': 'success'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fund-review/snapshots/<int:snap_id>', methods=['DELETE'])
+@login_required
+def delete_fund_snapshot(snap_id):
+    """Delete a specific PMS Review snapshot."""
+    conn = get_db()
+    try:
+        conn.execute('DELETE FROM fund_snapshots WHERE id = ? AND user_id = ?', (snap_id, current_user.id))
+        conn.commit()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # --- NEW ATH SCANNER (4-Strategy) ROUTES ---
 
 # Scanner progress state (Persistent via DB)
