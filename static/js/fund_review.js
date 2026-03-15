@@ -111,6 +111,15 @@ function exportExcel() {
     const data = collectEntryData();
     const headers = ['Stock', 'Alloc %', 'RS Start', 'RS W1', 'RS W2', 'RS W3', 'RS W4', 'RS W5', 'Px Start', 'Px W1', 'Px W2', 'Px W3', 'Px W4', 'Px W5', 'Supertrend'];
     const rows = data.rows.map(r => [r.stock, r.alloc, r.rsStart, r.rsW1, r.rsW2, r.rsW3, r.rsW4, r.rsW5, r.pxStart, r.pxW1, r.pxW2, r.pxW3, r.pxW4, r.pxW5, r.st]);
+
+    // Add Nifty 500 as a benchmark row
+    rows.push([
+        'NIFTY 500', '',
+        data.niftyRsStart, data.niftyRsW1, data.niftyRsW2, data.niftyRsW3, data.niftyRsW4, data.niftyRsW5,
+        data.niftyPxStart, data.niftyPxW1, data.niftyPxW2, data.niftyPxW3, data.niftyPxW4, data.niftyPxW5,
+        ''
+    ]);
+
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, currentFund === 'gm' ? 'Growth Mantra' : 'Wealth Mantra');
@@ -197,6 +206,7 @@ function importSelectedColumns() {
     checks.forEach((cb, i) => { if (cb.checked) { const field = maps[i].value; if (field) mapping[parseInt(cb.dataset.idx)] = field; } });
     if (!mapping[0] && !Object.values(mapping).includes('stock')) { alert('Stock column must be mapped.'); return; }
 
+    const niftyData = {};
     const rows = excelParsedData.dataRows.map(dr => {
         const r = emptyRow();
         Object.entries(mapping).forEach(([ci, field]) => {
@@ -207,9 +217,21 @@ function importSelectedColumns() {
             else { r[field] = String(val).trim(); }
         });
         return r;
-    }).filter(r => r.stock);
+    }).filter(r => {
+        if (r.stock === 'NIFTY 500') {
+            // Populate Nifty fields from this row
+            NIFTY_FIELDS.forEach(f => {
+                const stockField = f.replace('nifty', '').charAt(0).toLowerCase() + f.replace('nifty', '').slice(1);
+                if (r[stockField] !== undefined) niftyData[f] = r[stockField];
+            });
+            return false; // exclude from entryRows
+        }
+        return r.stock;
+    });
 
-    if (!rows.length) { alert('No valid rows found.'); return; }
+    if (Object.keys(niftyData).length) setNiftyData(niftyData);
+
+    if (!rows.length && !Object.keys(niftyData).length) { alert('No valid data found.'); return; }
     entryRows = rows; rebuildTableDOM();
     closeModal('excel-modal');
 }
