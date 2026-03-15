@@ -473,6 +473,180 @@ body.fund-gm {
     background: var(--neutral)
 }
 
+/* Visual Bifurcation 2.0 */
+.weekly-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 10px;
+}
+
+@media(max-width: 1200px) {
+    .weekly-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.health-container {
+    margin-bottom: 16px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-light);
+}
+
+.health-bar-wrap {
+    height: 8px;
+    background: var(--border-light);
+    border-radius: 4px;
+    display: flex;
+    overflow: hidden;
+    margin: 10px 0;
+}
+
+.health-segment {
+    height: 100%;
+    transition: width 0.5s ease;
+}
+
+.health-segment.pos {
+    background: var(--green);
+}
+
+.health-segment.neg {
+    background: var(--red);
+}
+
+.health-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.bifurcation-twin {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    height: 100%;
+}
+
+.bif-card {
+    background: #fff;
+    border: 1px solid var(--border-light);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.02);
+}
+
+.bif-card.pos {
+    border-top: 4px solid var(--green);
+}
+
+.bif-card.neg {
+    border-top: 4px solid var(--red);
+}
+
+.bif-card-header {
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.01);
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    justify-content: space-between;
+    min-height: 64px;
+    /* Fixed height for header to align properly */
+    align-items: flex-start;
+}
+
+.bif-card-title {
+    font-size: 12px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+
+.bif-card-count {
+    flex-shrink: 0;
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.05);
+    padding: 2px 8px;
+    border-radius: 10px;
+    color: var(--secondary-color);
+    margin-left: 8px;
+    white-space: nowrap;
+}
+
+.bif-card-body {
+    padding: 12px;
+    flex: 1;
+}
+
+.bif6-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 80px;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 10px;
+    margin-bottom: 4px;
+    transition: background 0.2s;
+}
+
+.bif6-row:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+.bif6-stock {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--primary-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bif6-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.bif6-badge.rs {
+    background: var(--accent-dim);
+    color: var(--accent);
+    justify-self: center;
+    /* Center RS rating */
+}
+
+.bif6-badge.alloc {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--secondary-color);
+    justify-self: end;
+    /* Right align allocation */
+}
+
+.bif-card-footer {
+    padding: 12px 20px;
+    background: rgba(0, 0, 0, 0.02);
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    justify-content: space-between;
+    font-weight: 700;
+    font-size: 12px;
+}
+
+@media (max-width: 768px) {
+    .bifurcation-twin {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Nifty grid */
 .nifty-grid {
     display: grid;

@@ -417,50 +417,90 @@ function renderWeekly(rows, snap) {
     const above = classified.filter(c => c.isAbove);
     const below = classified.filter(c => !c.isAbove);
 
-    // --- Tab 1: Single table RS Review + Single table Supertrend ---
-    const buildSplitTable = (titleL, dotL, itemsL, titleR, dotR, itemsR, showRs) => {
-        const maxLen = Math.max(itemsL.length, itemsR.length, 1);
-        const totalL = itemsL.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
-        const totalR = itemsR.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
-        let html = '<div class="stock-table-wrap" style="margin-bottom:16px"><table class="stock-table"><thead><tr>';
-        html += `<th colspan="${showRs ? 3 : 2}" style="text-align:center;background:var(--green-dim);color:var(--green)"><span class="bif-dot ${dotL}" style="display:inline-block;margin-right:6px"></span>${titleL}</th>`;
-        html += `<th colspan="${showRs ? 3 : 2}" style="text-align:center;background:var(--red-dim);color:var(--red);border-left:2px solid var(--border-light)"><span class="bif-dot ${dotR}" style="display:inline-block;margin-right:6px"></span>${titleR}</th>`;
-        html += '</tr><tr>';
-        html += '<th>Stock</th>';
-        if (showRs) html += '<th style="text-align:center">RS</th>';
-        html += '<th style="text-align:center">Alloc</th>';
-        html += `<th style="border-left:2px solid var(--border-light)">Stock</th>`;
-        if (showRs) html += '<th style="text-align:center">RS</th>';
-        html += '<th style="text-align:center">Alloc</th>';
-        html += '</tr></thead><tbody>';
-        for (let i = 0; i < maxLen; i++) {
-            const l = itemsL[i], r = itemsR[i];
-            html += '<tr>';
-            html += l ? `<td style="font-weight:500">${esc(l.stock)}</td>` : '<td></td>';
-            if (showRs) html += l ? `<td style="text-align:center">${l.latestRs?.toFixed(1) || '—'}</td>` : '<td></td>';
-            html += l ? `<td style="text-align:center">${fPct(parseFloat(l.alloc) / 100)}</td>` : '<td></td>';
-            html += r ? `<td style="font-weight:500;border-left:2px solid var(--border-light)">${esc(r.stock)}</td>` : '<td style="border-left:2px solid var(--border-light)"></td>';
-            if (showRs) html += r ? `<td style="text-align:center">${r.latestRs?.toFixed(1) || '—'}</td>` : '<td></td>';
-            html += r ? `<td style="text-align:center">${fPct(parseFloat(r.alloc) / 100)}</td>` : '<td></td>';
-            html += '</tr>';
-        }
-        html += `<tr class="total-row"><td>${itemsL.length} stocks</td>`;
-        if (showRs) html += '<td></td>';
-        html += `<td style="text-align:center">${fPct(totalL)}</td>`;
-        html += `<td style="border-left:2px solid var(--border-light)">${itemsR.length} stocks</td>`;
-        if (showRs) html += '<td></td>';
-        html += `<td style="text-align:center">${fPct(totalR)}</td></tr>`;
-        html += '</tbody></table></div>';
-        return html;
+    const buildHealthBar = (totalPos, totalNeg, title) => {
+        const total = totalPos + totalNeg;
+        const pPos = total > 0 ? (totalPos / total * 100).toFixed(0) : 50;
+        const pNeg = total > 0 ? (totalNeg / total * 100).toFixed(0) : 50;
+        return `
+            <div class="health-container">
+                <div class="health-labels">
+                    <span style="color:var(--green)">${title} POSITIVE (${pPos}%)</span>
+                    <span style="color:var(--red)">NEGATIVE (${pNeg}%)</span>
+                </div>
+                <div class="health-bar-wrap">
+                    <div class="health-segment pos" style="width:${pPos}%"></div>
+                    <div class="health-segment neg" style="width:${pNeg}%"></div>
+                </div>
+            </div>`;
     };
 
-    document.getElementById('wk-rs-review').innerHTML =
-        `<div class="card-title" style="margin-bottom:12px">RS Review <span style="font-weight:400;font-size:12px;color:var(--secondary-color)">(vs Nifty RS: ${niftyLatestRs?.toFixed(1) || 'N/A'})</span></div>` +
-        buildSplitTable('Strong (RS > Nifty)', 'green', strong, 'Weak (RS ≤ Nifty)', 'red', weak, true);
+    const buildTwinBif = (itemsPos, titlePos, itemsNeg, titleNeg, showRs) => {
+        const tPos = itemsPos.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
+        const tNeg = itemsNeg.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
 
-    document.getElementById('wk-st-status').innerHTML =
-        '<div class="card-title" style="margin-bottom:12px">Supertrend Status</div>' +
-        buildSplitTable('Above Supertrend', 'green', above, 'Below Supertrend', 'red', below, false);
+        const row = r => `
+            <div class="bif6-row">
+                <div class="bif6-stock">${esc(r.stock)}</div>
+                ${showRs ? `<div class="bif6-badge rs">RS ${r.latestRs?.toFixed(1) || '—'}</div>` : '<div></div>'}
+                <div class="bif6-badge alloc">${fPct(parseFloat(r.alloc) / 100)}</div>
+            </div>`;
+
+        return `
+            <div class="bifurcation-twin">
+                <div class="bif-card pos">
+                    <div class="bif-card-header">
+                        <div class="bif-card-title"><span class="bif-dot green"></span>${titlePos}</div>
+                        <div class="bif-card-count">${itemsPos.length} Stocks</div>
+                    </div>
+                    <div class="bif-card-body">
+                        ${itemsPos.length ? itemsPos.map(row).join('') : '<div style="color:#999;text-align:center;padding:20px;font-size:12px">No stocks in this category</div>'}
+                    </div>
+                    <div class="bif-card-footer">
+                        <span>Total Allocation</span>
+                        <span style="color:var(--green)">${fPct(tPos)}</span>
+                    </div>
+                </div>
+                <div class="bif-card neg" style="border-left:1px solid var(--border-light)">
+                    <div class="bif-card-header">
+                        <div class="bif-card-title"><span class="bif-dot red"></span>${titleNeg}</div>
+                        <div class="bif-card-count">${itemsNeg.length} Stocks</div>
+                    </div>
+                    <div class="bif-card-body">
+                        ${itemsNeg.length ? itemsNeg.map(row).join('') : '<div style="color:#999;text-align:center;padding:20px;font-size:12px">No stocks in this category</div>'}
+                    </div>
+                    <div class="bif-card-footer">
+                        <span>Total Allocation</span>
+                        <span style="color:var(--red)">${fPct(tNeg)}</span>
+                    </div>
+                </div>
+            </div>`;
+    };
+
+    const tStrong = strong.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
+    const tWeak = weak.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
+    const tAbove = above.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
+    const tBelow = below.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
+
+    // Render into a single massive grid layout if we want absolute uniformity
+    const wkContainer = document.getElementById('wk-tab1');
+    wkContainer.innerHTML = `
+        <div class="weekly-grid">
+            <div class="weekly-section">
+                <div class="card-title" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;min-height:30px">
+                    <span>RS REVIEW MOMENTUM</span>
+                    <span style="font-weight:400;font-size:12px;color:var(--secondary-color)">VS NIFTY RS: ${niftyLatestRs?.toFixed(1) || '—'}</span>
+                </div>
+                ${buildHealthBar(tStrong, tWeak, 'RS Review')}
+                ${buildTwinBif(strong, 'STRONG RS (BEATING MARKET)', weak, 'WEAK RS (LAGGING MARKET)', true)}
+            </div>
+            <div class="weekly-section">
+                <div class="card-title" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;min-height:30px">
+                    <span>SUPERTREND TREND STATUS</span>
+                </div>
+                ${buildHealthBar(tAbove, tBelow, 'Supertrend')}
+                ${buildTwinBif(above, 'ABOVE SUPERTREND (BULLISH)', below, 'BELOW SUPERTREND (BEARISH)', false)}
+            </div>
+        </div>`;
 
     // --- Tab 2: Outperformers / Underperformers / Neutral ---
     const outperf = classified.filter(c => c.isStrong === true && c.isAbove);
