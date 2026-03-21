@@ -27,7 +27,7 @@ const pctChg = (a, b) => { const fa = parseFloat(a), fb = parseFloat(b); if (isN
 const closeModal = id => document.getElementById(id).classList.remove('visible');
 
 function emptyRow(stock = '') {
-    return { stock, alloc: '', rsStart: '', rsW1: '', rsW2: '', rsW3: '', rsW4: '', rsW5: '', pxStart: '', pxW1: '', pxW2: '', pxW3: '', pxW4: '', pxW5: '', st: 'above' };
+    return { stock, em: '', alloc: '', rsStart: '', rsW1: '', rsW2: '', rsW3: '', rsW4: '', rsW5: '', pxStart: '', pxW1: '', pxW2: '', pxW3: '', pxW4: '', pxW5: '', st: 'above' };
 }
 
 // --- NIFTY FIELDS ---
@@ -83,24 +83,30 @@ function togglePasteArea() { document.getElementById('paste-area').style.display
 
 // --- TABLE DOM ---
 function rebuildTableDOM() {
-    const rsFields = ['rsStart', 'rsW1', 'rsW2', 'rsW3', 'rsW4', 'rsW5'];
-    const pxFields = ['pxStart', 'pxW1', 'pxW2', 'pxW3', 'pxW4', 'pxW5'];
-    document.getElementById('stock-tbody').innerHTML = entryRows.map((r, i) => `
-        <tr>
-            <td style="font-weight:600;color:#666;text-align:center">${i + 1}</td>
-            <td><input type="text" value="${esc(r.stock)}" style="min-width:100px"/></td>
-            <td><input type="number" value="${esc(r.alloc)}" step="0.01" placeholder="—" style="min-width:60px"/></td>
-            ${rsFields.map((f, j) => `<td${j === 0 ? ' class="col-group-sep"' : ''}><input type="number" value="${esc(r[f])}" step="0.1" placeholder="—" style="min-width:55px"/></td>`).join('')}
-            ${pxFields.map((f, j) => `<td${j === 0 ? ' class="col-group-sep"' : ''}><input type="number" value="${esc(r[f])}" step="0.01" placeholder="—" style="min-width:70px"/></td>`).join('')}
-            <td><div class="st-toggle">
-                <button class="st-toggle-btn above ${r.st !== 'below' ? 'active' : ''}" onclick="setST(this)">▲</button>
-                <button class="st-toggle-btn below ${r.st === 'below' ? 'active' : ''}" onclick="setST(this)">▼</button>
-            </div></td>
-            <td><button class="btn-ghost" style="color:var(--danger-color);border:none;padding:4px" onclick="removeRow(${i})">✕</button></td>
-        </tr>
-    `).join('');
+    const tbody = document.getElementById('stock-tbody');
+    tbody.innerHTML = '';
+    entryRows.forEach((r, i) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="text-align:center">${i + 1}</td>
+            <td><input type="text" value="${esc(r.stock)}" class="pms-input" placeholder="Stock..." style="min-width:120px"></td>
+            <td><input type="number" step="0.01" value="${r.em || ''}" class="pms-input" placeholder="EM" style="width:60px;text-align:center"></td>
+            <td><input type="number" step="0.01" value="${r.alloc ? parseFloat(r.alloc).toFixed(2) : ''}" class="pms-input" placeholder="%" style="width:60px;text-align:center"></td>
+            <td class="col-group-sep">${WKS.slice(0, 1).map(w => `<input type="number" step="0.1" value="${r['rs' + w]}" class="pms-input" placeholder="RS" style="width:60px;text-align:center">`).join('')}</td>
+            ${WKS.slice(1).map(w => `<td><input type="number" step="0.1" value="${r['rs' + w]}" class="pms-input" placeholder="RS" style="width:60px;text-align:center"></td>`).join('')}
+            <td class="col-group-sep">${WKS.slice(0, 1).map(w => `<input type="number" step="0.01" value="${r['px' + w]}" class="pms-input" placeholder="Px" style="width:80px;text-align:center">`).join('')}</td>
+            ${WKS.slice(1).map(w => `<td><input type="number" step="0.01" value="${r['px' + w]}" class="pms-input" placeholder="Px" style="width:80px;text-align:center"></td>`).join('')}
+            <td class="col-group-sep">
+                <div class="st-toggle">
+                    <button class="st-toggle-btn above ${r.st === 'above' ? 'active' : ''}" onclick="setST(this)">A</button>
+                    <button class="st-toggle-btn below ${r.st === 'below' ? 'active' : ''}" onclick="setST(this)">B</button>
+                </div>
+            </td>
+            <td><button class="btn-ghost btn-sm" onclick="removeRow(${i})">×</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
 }
-
 function setST(btn) { const p = btn.closest('.st-toggle'); p.querySelectorAll('.st-toggle-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); }
 function removeRow(i) { entryRows.splice(i, 1); rebuildTableDOM(); }
 function addStockRow() { entryRows.push(emptyRow('')); rebuildTableDOM(); const tbody = document.getElementById('stock-tbody'); const lastTr = tbody.lastElementChild; if (lastTr) lastTr.querySelector('input').focus(); }
@@ -109,14 +115,22 @@ function clearAllRows() { if (confirm('Clear all rows?')) { entryRows = []; rebu
 // --- EXPORT EXCEL ---
 function exportExcel() {
     const data = collectEntryData();
-    const headers = ['Stock', 'Alloc %', 'RS Start', 'RS W1', 'RS W2', 'RS W3', 'RS W4', 'RS W5', 'Px Start', 'Px W1', 'Px W2', 'Px W3', 'Px W4', 'Px W5', 'Supertrend'];
-    const rows = data.rows.map(r => [r.stock, r.alloc, r.rsStart, r.rsW1, r.rsW2, r.rsW3, r.rsW4, r.rsW5, r.pxStart, r.pxW1, r.pxW2, r.pxW3, r.pxW4, r.pxW5, r.st]);
+    const headers = ['Stock', 'EM Rating', 'Alloc %', 'RS Start', 'RS W1', 'RS W2', 'RS W3', 'RS W4', 'RS W5', 'Px Start', 'Px W1', 'Px W2', 'Px W3', 'Px W4', 'Px W5', 'Supertrend'];
+
+    const n = v => (v === '' || isNaN(v)) ? v : parseFloat(v);
+
+    const rows = data.rows.map(r => [
+        r.stock, n(r.em), n(r.alloc),
+        n(r.rsStart), n(r.rsW1), n(r.rsW2), n(r.rsW3), n(r.rsW4), n(r.rsW5),
+        n(r.pxStart), n(r.pxW1), n(r.pxW2), n(r.pxW3), n(r.pxW4), n(r.pxW5),
+        r.st
+    ]);
 
     // Add Nifty 500 as a benchmark row
     rows.push([
-        'NIFTY 500', '',
-        data.niftyRsStart, data.niftyRsW1, data.niftyRsW2, data.niftyRsW3, data.niftyRsW4, data.niftyRsW5,
-        data.niftyPxStart, data.niftyPxW1, data.niftyPxW2, data.niftyPxW3, data.niftyPxW4, data.niftyPxW5,
+        'NIFTY 500', '', '',
+        n(data.niftyRsStart), n(data.niftyRsW1), n(data.niftyRsW2), n(data.niftyRsW3), n(data.niftyRsW4), n(data.niftyRsW5),
+        n(data.niftyPxStart), n(data.niftyPxW1), n(data.niftyPxW2), n(data.niftyPxW3), n(data.niftyPxW4), n(data.niftyPxW5),
         ''
     ]);
 
@@ -132,9 +146,10 @@ function collectEntryData() {
     const rows = [];
     document.querySelectorAll('#stock-tbody tr').forEach(tr => {
         const inp = tr.querySelectorAll('input');
-        const row = { stock: inp[0].value.trim(), alloc: inp[1].value, st: tr.querySelector('.st-toggle-btn.above.active') ? 'above' : 'below' };
-        rsF.forEach((f, j) => row[f] = inp[2 + j].value);
-        pxF.forEach((f, j) => row[f] = inp[8 + j].value);
+        // Adjusted indices for EM field
+        const row = { stock: inp[0].value.trim(), em: inp[1].value, alloc: inp[2].value, st: tr.querySelector('.st-toggle-btn.above.active') ? 'above' : 'below' };
+        rsF.forEach((f, j) => row[f] = inp[3 + j].value);
+        pxF.forEach((f, j) => row[f] = inp[9 + j].value);
         rows.push(row);
     });
     const d = { fund: currentFund, date: document.getElementById('review-date').value, rows, ...getNiftyData() };
@@ -147,12 +162,13 @@ function parsePaste() {
     const parsed = [];
     lines.forEach(l => {
         const c = l.split('\t'); if (c.length < 2) return;
-        let alloc = parseFloat(c[1]?.replace('%', '')); if (!isNaN(alloc) && alloc <= 1) alloc *= 100;
         const r = emptyRow(c[0]?.trim() || '');
+        r.em = c[1]?.trim() || ''; // Assuming EM is the second column in paste
+        let alloc = parseFloat(String(c[2] || '').replace('%', ''));
         r.alloc = isNaN(alloc) ? '' : alloc;
-        ['rsStart', 'rsW1', 'rsW2', 'rsW3', 'rsW4', 'rsW5'].forEach((f, j) => r[f] = c[2 + j]?.trim() || '');
-        ['pxStart', 'pxW1', 'pxW2', 'pxW3', 'pxW4', 'pxW5'].forEach((f, j) => r[f] = c[8 + j]?.trim() || '');
-        r.st = (c[14] || '').toLowerCase().includes('below') ? 'below' : 'above';
+        ['rsStart', 'rsW1', 'rsW2', 'rsW3', 'rsW4', 'rsW5'].forEach((f, j) => r[f] = c[3 + j]?.trim() || ''); // Adjusted index for RS fields
+        ['pxStart', 'pxW1', 'pxW2', 'pxW3', 'pxW4', 'pxW5'].forEach((f, j) => r[f] = c[9 + j]?.trim() || ''); // Adjusted index for Px fields
+        r.st = (c[15] || '').toLowerCase().includes('below') ? 'below' : 'above'; // Adjusted index for ST
         parsed.push(r);
     });
     if (!parsed.length) return alert('No valid data found.');
@@ -180,14 +196,14 @@ function handleExcelUpload(e) {
 }
 
 function showExcelColumnPicker(headers) {
-    const FIELD_MAP = ['stock', 'alloc', 'rsStart', 'rsW1', 'rsW2', 'rsW3', 'rsW4', 'rsW5', 'pxStart', 'pxW1', 'pxW2', 'pxW3', 'pxW4', 'pxW5', 'st'];
-    const labels = ['Stock', 'Alloc %', 'RS Start', 'RS W1', 'RS W2', 'RS W3', 'RS W4', 'RS W5', 'Px Start', 'Px W1', 'Px W2', 'Px W3', 'Px W4', 'Px W5', 'Supertrend'];
-    let html = '<table class="stock-table" style="font-size:13px"><thead><tr><th>Excel Column</th><th>Import?</th><th>Map To</th></tr></thead><tbody>';
+    const FIELD_MAP = ['stock', 'em', 'alloc', 'rsStart', 'rsW1', 'rsW2', 'rsW3', 'rsW4', 'rsW5', 'pxStart', 'pxW1', 'pxW2', 'pxW3', 'pxW4', 'pxW5', 'st'];
+    const labels = ['Stock', 'EM Rating', 'Alloc %', 'RS Start', 'RS W1', 'RS W2', 'RS W3', 'RS W4', 'RS W5', 'Px Start', 'Px W1', 'Px W2', 'Px W3', 'Px W4', 'Px W5', 'Supertrend'];
+    let html = '<table class="stock-table" style="font-size:13px"><thead><tr><th>Excel Column</th><th style="text-align:center">Import?</th><th>Map To</th></tr></thead><tbody>';
     headers.forEach((h, i) => {
         const autoMap = i < FIELD_MAP.length ? FIELD_MAP[i] : '';
         const isStock = autoMap === 'stock';
         html += `<tr><td style="font-weight:600">${esc(h)}</td>
-            <td><input type="checkbox" class="exc-check" data-idx="${i}" ${isStock ? 'checked disabled' : i < FIELD_MAP.length ? 'checked' : ''}></td>
+            <td style="text-align:center"><input type="checkbox" class="exc-check" data-idx="${i}" ${isStock ? 'checked disabled' : i < FIELD_MAP.length ? 'checked' : ''}></td>
             <td><select class="pms-input exc-map" data-idx="${i}" style="padding:4px;font-size:12px">
                 <option value="">— Skip —</option>
                 ${FIELD_MAP.map((f, j) => `<option value="${f}" ${f === autoMap ? 'selected' : ''}>${labels[j]}</option>`).join('')}
@@ -212,7 +228,7 @@ function importSelectedColumns() {
         Object.entries(mapping).forEach(([ci, field]) => {
             let val = dr[parseInt(ci)];
             if (val === undefined || val === null) val = '';
-            if (field === 'alloc') { let v = parseFloat(String(val).replace('%', '')); if (!isNaN(v) && v <= 1) v *= 100; r.alloc = isNaN(v) ? '' : v; }
+            if (field === 'alloc') { let v = parseFloat(String(val).replace('%', '')); r.alloc = isNaN(v) ? '' : v; }
             else if (field === 'st') { r.st = String(val).toLowerCase().includes('below') ? 'below' : 'above'; }
             else { r[field] = String(val).trim(); }
         });
@@ -247,7 +263,7 @@ async function fetchPrices(field, dateInputId) {
     });
     if (!symbols.length) return alert('No stocks in the table.');
 
-    const fieldMap = { pxStart: 8, pxW1: 9, pxW2: 10, pxW3: 11, pxW4: 12, pxW5: 13 };
+    const fieldMap = { pxStart: 9, pxW1: 10, pxW2: 11, pxW3: 12, pxW4: 13, pxW5: 14 };
     const colIdx = fieldMap[field];
 
     try {
@@ -532,7 +548,12 @@ function renderWeekly(rows, snap) {
     const bifCard = (title, dotCls, items) => {
         const totalAlloc = items.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
         return `<div class="bifurcation"><div class="bif-header"><div class="bif-dot ${dotCls}"></div>${title}</div><div class="bif-body">
-            ${items.length ? items.map(r => `<div class="bif-item"><span>${esc(r.stock)}</span><span style="color:var(--secondary-color)">${fPct(parseFloat(r.alloc) / 100)}</span></div>`).join('') : '<div style="color:#999;font-size:12px;padding:8px 0">—</div>'}
+            ${items.length ? items.map(r => `
+                <div class="bif-item" style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:8px">
+                    <span style="text-align:left">${esc(r.stock)}</span>
+                    <span style="color:var(--accent); font-weight:600; text-align:center">${r.em || '—'}</span>
+                    <span style="color:var(--secondary-color); text-align:right">${fPct(parseFloat(r.alloc) / 100)}</span>
+                </div>`).join('') : '<div style="color:#999;font-size:12px;padding:8px 0">—</div>'}
             <div class="bif-total"><span>${items.length} stocks</span><span>${fPct(totalAlloc)}</span></div></div></div>`;
     };
 
