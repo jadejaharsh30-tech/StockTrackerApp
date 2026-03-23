@@ -389,7 +389,12 @@ function renderMTD(rows, snap) {
     // Sort
     computed.sort((a, b) => {
         let vA, vB;
-        if (mtdSortCol === 'rsStart') { vA = a.rsStart; vB = b.rsStart; }
+        if (mtdSortCol === 'stock') {
+            vA = a.stock.toLowerCase();
+            vB = b.stock.toLowerCase();
+            return vA < vB ? -1 * mtdSortDir : (vA > vB ? 1 * mtdSortDir : 0);
+        }
+        else if (mtdSortCol === 'rsStart') { vA = a.rsStart; vB = b.rsStart; }
         else if (mtdSortCol === 'mtdRet') { vA = a.mtdRet || 0; vB = b.mtdRet || 0; }
         else if (mtdSortCol === 'portRet') { vA = a.portRet || 0; vB = b.portRet || 0; }
         else { const w = mtdSortCol.replace('rsW', ''); vA = parseFloat(a[`rsW${w}`]) || 0; vB = parseFloat(b[`rsW${w}`]) || 0; }
@@ -400,7 +405,7 @@ function renderMTD(rows, snap) {
     const sortIcon = col => col === mtdSortCol ? (mtdSortDir > 0 ? ' ↑' : ' ↓') : '';
     const thStyle = 'text-align:center;cursor:pointer;user-select:none';
 
-    let html = `<thead><tr><th style="text-align:left">Stock</th><th style="${thStyle}" onclick="mtdSort('rsStart')">RS Start${sortIcon('rsStart')}</th>`;
+    let html = `<thead><tr><th style="text-align:left;cursor:pointer;user-select:none" onclick="mtdSort('stock')">Stock${sortIcon('stock')}</th><th style="${thStyle}" onclick="mtdSort('rsStart')">RS Start${sortIcon('rsStart')}</th>`;
     activeWeeks.forEach(w => html += `<th style="${thStyle}" onclick="mtdSort('rsW${w}')">RS W${w}${sortIcon('rsW' + w)}</th>`);
     html += `<th style="${thStyle}" onclick="mtdSort('mtdRet')">MTD Return${sortIcon('mtdRet')}</th>`;
     html += `<th style="${thStyle}" onclick="mtdSort('portRet')">Portfolio Return${sortIcon('portRet')}</th></tr></thead><tbody>`;
@@ -445,13 +450,14 @@ function renderWeekly(rows, snap) {
     const classified = rows.map(r => {
         const latest = getLatestWeek(r, 'rs');
         const latestRs = latest ? latest.val : parseFloat(r.rsStart);
-        const isStrong = (niftyLatestRs !== null && !isNaN(latestRs)) ? latestRs > niftyLatestRs : null;
+        const isStrong = (niftyLatestRs !== null && !isNaN(latestRs) && niftyLatestRs !== 0) ? latestRs > niftyLatestRs : null;
         const isAbove = r.st === 'above';
-        return { ...r, latestRs, isStrong, isAbove };
+        const rsDiff = (niftyLatestRs !== null && !isNaN(latestRs) && niftyLatestRs !== 0) ? ((latestRs / niftyLatestRs) - 1) : null;
+        return { ...r, latestRs, isStrong, isAbove, rsDiff };
     });
 
-    const strong = classified.filter(c => c.isStrong === true);
-    const weak = classified.filter(c => c.isStrong === false);
+    const strong = classified.filter(c => c.isStrong === true).sort((a, b) => (b.rsDiff || 0) - (a.rsDiff || 0));
+    const weak = classified.filter(c => c.isStrong === false).sort((a, b) => (a.rsDiff || 0) - (b.rsDiff || 0));
     const above = classified.filter(c => c.isAbove);
     const below = classified.filter(c => !c.isAbove);
 
@@ -476,12 +482,21 @@ function renderWeekly(rows, snap) {
         const tPos = itemsPos.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
         const tNeg = itemsNeg.reduce((s, r) => s + (parseFloat(r.alloc) || 0) / 100, 0);
 
-        const row = r => `
+        const row = r => {
+            let rsDiffStr = '—';
+            let colorCls = '';
+            if (showRs && r.rsDiff !== null && r.rsDiff !== undefined) {
+                const pct = r.rsDiff * 100;
+                rsDiffStr = (pct > 0 ? '+' : '') + pct.toFixed(1) + '%';
+                colorCls = pct > 0 ? 'pos' : (pct < 0 ? 'neg' : '');
+            }
+            return `
             <div class="bif6-row">
                 <div class="bif6-stock">${esc(r.stock)}</div>
-                ${showRs ? `<div class="bif6-badge rs">RS ${r.latestRs?.toFixed(1) || '—'}</div>` : '<div></div>'}
+                ${showRs ? `<div class="bif6-badge rs ${colorCls}">${rsDiffStr}</div>` : '<div></div>'}
                 <div class="bif6-badge alloc">${fPct(parseFloat(r.alloc) / 100)}</div>
             </div>`;
+        };
 
         return `
             <div class="bifurcation-twin">

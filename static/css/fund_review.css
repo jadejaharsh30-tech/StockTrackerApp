@@ -624,6 +624,16 @@ body.fund-gm {
     /* Center RS rating */
 }
 
+.bif6-badge.rs.pos {
+    background: var(--green-dim);
+    color: var(--green);
+}
+
+.bif6-badge.rs.neg {
+    background: var(--red-dim);
+    color: var(--red);
+}
+
 .bif6-badge.alloc {
     background: rgba(0, 0, 0, 0.05);
     color: var(--secondary-color);
