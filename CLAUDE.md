@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A personal Flask web app for tracking an Indian equity (NSE/BSE) portfolio: ATH (all-time-high) breakout scanning, a "Turtle" 4-pillar fundamental/technical scoring model, sector analytics, a PMS fund-review dashboard, alerts, news, and daily archiving. All prices/fundamentals/news come from `yfinance` live — there is no separate market-data ingestion service.
 
+For a deep, route-by-route trace of every feature workflow (which routes/modules/tables implement it, the exact GO/WAIT and RS-outperformance formulas, the three-way SQLite database split, and known duplicated/dead logic paths), see **[`WORKFLOWS.md`](./WORKFLOWS.md)**. This file stays intentionally terse; that one has the holistic picture.
+
 ## Running the app
 
 ```bash
