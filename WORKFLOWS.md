@@ -70,11 +70,13 @@ Every row is classified by the same rule, computed inline wherever it's needed (
 
 ```
 category, remark = get_investment_category(ath_outperformance, ath_profit, idx_type)
-  ath_outperformance != 'Y'                          → NO ENTRY ("ATH OP is 'N'")
-  ath_outperformance == 'Y' and ath_profit != 'Y'     → NO ENTRY ("Index is not 'FNO'" — misleading text)
-  ath_outperformance == 'Y' and ath_profit == 'Y':
-      idx_type == 'FNO'                               → FUND
-      else                                             → PROP
+  ath_outperformance != 'Y'                                   → NO ENTRY ("ATH OP is 'N'")
+  ath_outperformance == 'Y' and ath_profit == 'Y'             → FUND    (idx_type irrelevant)
+  ath_outperformance == 'Y' and ath_profit != 'Y' and FNO     → PROP
+  ath_outperformance == 'Y' and ath_profit != 'Y' and not FNO → NO ENTRY ("Index is not 'FNO'")
+
+ATH outperformance is the hard gate — nothing enters without it. ath_profit == 'Y'
+promotes to FUND on its own; FNO-only names fall back to PROP.
 
 is_tracked = category in (FUND, PROP)
 price_gt_rounding = cmp > rounding
@@ -105,7 +107,7 @@ The most complex subsystem, and it has **two live implementations wired into the
   2. **Fast batch detect**: 50-ticker batches, 5-day history, flags "potential hits" where today's high ≥ stored `previous_ath`.
   3. **In-depth analysis** (only for hits): Green Candle (`close ≥ prev_close`), Close > ATH (`close > previous_ath`), and RS Outperformance — a 211-day "rolling fixed-anchor RS" against Nifty 500 (`^CRSLDX`, falling back to `^NSEI`): anchor the stock/index close ratio at the start of the window, and flag `Y` if today's anchored ratio is within 0.01% of the window's max.
   Results land in `ath_scanning_results` (wiped/rebuilt each run) and `ath_tracking_table.today_ath`.
-- **`ath_scanner.py`** (`ATHScanner` class, still imported and instantiated at `app.py:2988`/`3013`, driving `/api/ath/run-daily` and `/api/ath/run-refresh`) — an older single-strategy, non-batched ATH-break detector, explicitly labeled `LEGACY SCANNER` in the template JS/button IDs but not removed.
+- **`ath_scanner.py`** (`ATHScanner` class, still imported and instantiated at `app.py:2988`/`3013`, driving `/api/ath/run-daily` and `/api/ath/run-refresh`) — an older single-strategy, non-batched ATH-break detector, explicitly labeled `LEGACY SCANNER` in the template JS/button IDs. **It is wired to live buttons but non-functional**: it reads and writes an `ath_price` column that does not exist in the current `ath_tracking_table` schema (the column is `previous_ath`), so both its scan methods raise `OperationalError: no such column: ath_price`. See §6 for the full defect list.
 
 Both are backed by `scanner_status.py`'s `ScannerStatusManager`, which persists scan progress to the `scanner_state` table (keyed by `user_id`) specifically because gunicorn runs multiple worker processes — an in-memory progress dict can't be polled cross-process, so the frontend's `setInterval` polling (`/api/scanner/status`, aliased to `/api/ath/status`) reads the DB instead.
 
@@ -154,7 +156,7 @@ The dashboard's "Best/Worst Performer" widget is deliberately split across two r
 ## 6. Known quirks worth knowing before you change things
 
 - `get_investment_category()` — the central GO/WAIT/FUND/PROP rule — is copy-pasted between `app.py` and `daily_tasks.py`, and the GO-list filter in `/go-list` is a third inline reimplementation of the same condition. Changing the trading rule means changing it in three places.
-- Two ATH scanners are both live and reachable from the same page (`scanner_engine.py` primary, `ath_scanner.py` legacy) — confirm which one a bug report is actually about before debugging.
+- Two ATH scanners are reachable from the same page, but only `scanner_engine.py` works — the `ath_scanner.py` legacy path is broken (see "Verified defects" below). Confirm which one a bug report is about before debugging.
 - Two independent 4-pillar scoring implementations exist (`scoring_engine.ScoringEngine`'s strict-bucket version vs. `fundamental_analysis.py`'s proportional-points version); only the latter is wired into `/fundamental-analysis` and `scoring_history`.
 - Sector aggregation is implemented three separate times with three different persistence stories: `SectorAnalytics.compute_sector_scores()` (writes `ath_tracker.db`, only run via the offline `setup_sector_analytics.py` script), `analytics_engine.calculate_sector_scores()` (in-memory, per-`/analytics`-request, user-scoped), and the portfolio-only `analytics_engine.get_portfolio_allocation()`.
 - `/sectors*` pages will appear empty on a fresh checkout until someone manually runs `setup_sector_analytics.py` against `ath_tracker.db` — the live app never populates that database itself.
@@ -165,3 +167,115 @@ The dashboard's "Best/Worst Performer" widget is deliberately split across two r
 - `app.secret_key` is a fixed literal string (intentional — avoids logging users out on dev-server reload — but means session cookies are forgeable if the key leaks).
 - `/api/ath/status` is registered by two different route declarations (`app.py:3000` and `app.py:3328`, the latter stacked with `/api/scanner/status`); both call the identical `status_manager.get_status()`, so it's inert duplication rather than a functional bug, but only one handler is ever reachable for that exact path.
 - `analytics_engine.calculate_portfolio_metrics()` is an explicit placeholder stub (fixed beta/alpha/volatility), and its "breadth" (advances/declines) numbers on `/analytics` are hardcoded, not computed.
+
+## 7. Deep dive: the ATH pipeline (workflows §4.3 → §4.5 → §4.2 → §4.4)
+
+Workflows 3, 4 and 5 are not independent features — they are four stages of one loop, and the handoffs between them are all **manual** (a button, an upload, or a cron job), never automatic.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Universe: user adds symbol<br/>(Profit Manager / Excel upload)
+    Universe: profit_tracker<br/>ath_profit · idx_type · result_date
+    Universe --> Baseline: Scan Phase 1 (sync)<br/>yf period=max, excl. today
+    Baseline: ath_tracking_table.previous_ath<br/>(lifetime high — the trigger price)
+    Baseline --> Hits: Scan Phase 2+3<br/>high >= previous_ath
+    Hits: ath_scanning_results (staging)<br/>+ today_ath set
+    Hits --> Baseline: EOD Promote (manual)<br/>today_ath → previous_ath
+    Hits --> Tracker: Bulk Add (manual)<br/>/api/bulk-add-portfolio
+    Tracker: stocks<br/>rounding = trigger_price
+    Tracker --> Archive: cron / manual-archive<br/>EOD close + GO/WAIT
+    Archive: historical_log (+ watchlist side-effects)
+    Archive --> [*]
+```
+
+### 7.1 The two-column ATH state machine
+
+`ath_tracking_table` (755 rows in the shipped DB, keyed on `symbol`, **no `user_id` — it is global, not per-user**) carries the whole scanner's memory in two columns:
+
+| Column | Meaning |
+|---|---|
+| `previous_ath` | The confirmed lifetime high. **This doubles as the trigger price** — `calculate_single_ticker` receives it as `trigger_price`, and Bulk Add maps it into `stocks.rounding`. |
+| `today_ath` | Scratch space for an *unconfirmed* intraday breakout. Set by `update_today_ath()` on every hit, cleared globally at the start of every scan (Phase 0) and at the end of every EOD Promote. |
+
+The promote step is the only thing that makes a breakout permanent:
+
+```sql
+UPDATE ath_tracking_table SET previous_ath = today_ath, ath_date = <today>
+WHERE symbol IN (<selected>) AND today_ath IS NOT NULL AND today_ath > previous_ath;
+UPDATE ath_tracking_table SET today_ath = NULL WHERE today_ath IS NOT NULL;  -- global
+```
+
+Two consequences worth internalising:
+- **Skipping EOD Promote is not neutral — it re-arms the same signal.** `previous_ath` stays where it was, so tomorrow's Phase 2 filter (`live_high >= previous_ath`) flags the identical stock again. A breakout you never promote reappears every day.
+- **The global `today_ath` clear is unconditional.** Promoting 2 of 10 hits wipes `today_ath` for the other 8 as well. They aren't lost (they're still in `ath_scanning_results` until the next scan) but their intraday high is gone from the master table.
+
+### 7.2 The Phase 2 filter is `>=`, and the zero-baseline trap
+
+```python
+if round(live_high, 2) >= round(current_ath, 2):   # scanner_engine.py:514
+```
+
+`>=` (not `>`) means a stock sitting exactly at its recorded ATH is a "hit" every single scan. More importantly, `sync_new_stocks_to_ath_tracker` inserts `previous_ath = 0.0` whenever the batch download fails or a symbol has no history (lines 214, 229, 233-234). **A symbol stuck at `previous_ath = 0.0` passes the filter unconditionally forever** — any positive price is `>= 0` — and it will be reported as an ATH hit with a `trigger_price` of `0.0` on every scan until someone fixes it via `/api/ath/update-record`. Worth a sanity query after adding a batch of new symbols:
+
+```sql
+SELECT symbol FROM ath_tracking_table WHERE previous_ath = 0 OR previous_ath IS NULL;
+```
+
+### 7.3 The RS-outperformance calculation (the one genuinely subtle formula)
+
+"ATH Outperformance" is *not* a simple return comparison. `calculate_rs_outperformance` builds a **rolling fixed-anchor relative-strength line** over `LOOKBACK = 211` sessions:
+
+1. Append today's live close to the fetched history, inner-join against the Nifty 500 series (`^CRSLDX`, fallback `^NSEI`) so holidays drop out.
+2. `RS_Raw = Stock_Close / Index_Close` per session.
+3. Take the last 211 rows; **re-anchor** to the first row of that window: `anchored = RS_Raw / RS_Raw[0] * 100`.
+4. Flag `Y` if `current_anchored >= max_anchored * 0.9999`.
+
+So the question it answers is *"is the stock's ratio-to-benchmark at its own 211-session high right now?"* — an ATH in **relative** terms, mirroring the price ATH. The `0.9999` factor is a float-equality tolerance, not a real tolerance band (≈0.01%).
+
+Constraint to know: it needs 211 *aligned* rows but `run_full_scan` only fetches `period="1y"` (~245 sessions). Any symbol with a shorter listing history, or enough missing sessions to drop the join below 211 rows, silently returns `'N/A'` rather than `Y`/`N`. Since ATH outperformance is the hard gate in `get_investment_category`, **`N/A` behaves as a rejection downstream** (it isn't `'Y'`).
+
+### 7.4 Progress reporting is not linear
+
+`run_full_scan`'s progress counter reaches `total` when Phase 2 ends, then Phase 3 calls `update_status(total, total, ...)` for every symbol it analyses. The UI therefore sits at **100% for the entire in-depth analysis phase**, which is the slow part (a 1-year batch history fetch plus per-symbol RS maths). Combined with `ScannerStatusManager`'s 3-second write throttle, a long scan looks stalled at 100% while it is still working normally.
+
+Scan state also has **no recovery path**: if the worker process dies mid-scan, `scanner_state.is_running` stays `1` and every future scan is refused with "Scanner already in progress." `ScannerStatusManager.reset_all()` exists precisely for this but is exposed by no route and no UI — recovery today means `UPDATE scanner_state SET is_running = 0;` by hand.
+
+### 7.5 The archive's decision tree (and where rows silently vanish)
+
+`perform_archive_for_user` (`daily_tasks.py:114`) is idempotent per user+date (it deletes that date's rows first), and re-derives GO/WAIT from **stored** flags plus a freshly fetched EOD close — it does not re-evaluate green-candle or close-above-ATH against market data:
+
+```
+for each row in stocks LEFT JOIN profit_tracker:
+    eod_price = yfinance close (5d window ending log_date+1)
+    if not eod_price:  ← row is SKIPPED ENTIRELY, no log entry, no warning
+    category = "NO ENTRY"/"New, add to Profit Mgr."   if no profit_tracker match
+             = get_investment_category(...)           otherwise
+    if category in (FUND, PROP):
+        if green_candle=='Y' and eod_price > rounding and close_above_ath=='Y':
+            trigger = GO,  remark = ""
+        elif eod_price <= rounding:
+            remark = "Rounding > CMP"
+    GO           → DELETE from watchlist
+    remark in (…) → UPSERT into watchlist
+```
+
+Three things to note:
+- **Silent data loss**: a `yfinance` miss (delisted ticker, network blip, bad symbol) means that stock gets *no* `historical_log` row for that date at all — no error, no placeholder. The archive reports success regardless.
+- The watchlist upsert list is `["Rounding > CMP", "ATH Profit is 'N'", "ATH OP is 'N'"]`, but `get_investment_category` never emits the string `"ATH Profit is 'N'"` — it emits `"Index is not 'FNO'"`. So that branch is **dead**, and NO-ENTRY-due-to-`ath_profit` names never reach the watchlist.
+- Archiving **does not clear `stocks`**. The daily tracker is not date-scoped; it carries forward until manually cleared, which is why re-running the archive for the same date is a delete-then-reinsert rather than an append.
+
+`get_correct_log_date()` maps Saturday→Friday and Sunday→Friday, but has **no holiday calendar** — running the job on an Indian market holiday archives that date using the previous session's close (`get_correct_eod_price` takes the last row of a 5-day window), producing a duplicate-priced log entry for a non-trading day.
+
+### 7.6 Verified defects in this pipeline
+
+Each of these was confirmed against the shipped `tracker.db` schema, not inferred:
+
+| Defect | Location | Effect |
+|---|---|---|
+| `ath_tracking_table` is created by **no** init script or migration | referenced in `app.py`, `scanner_engine.py`, `ath_scanner.py` | It exists only because the committed `tracker.db` already contains it. A fresh bootstrap (`init_base_tables.py` + `app.py`) produces a DB where **every scanner route fails**. |
+| Legacy scanner reads/writes column `ath_price` | `ath_scanner.py:137,153-154,206-207` | Column doesn't exist (it's `previous_ath`) → `OperationalError: no such column: ath_price`. Both `/api/ath/run-daily` and `/api/ath/run-refresh` are dead. |
+| `/api/ath/todays-results` selects `ath_price` | `app.py:3035` | Same missing column → endpoint always 500s. |
+| `SCAN_STATUS` referenced but never defined | `app.py:3010` | `NameError` on every `/api/ath/run-refresh` call, before it even reaches the broken scanner. |
+| `scanner_engine.py` hardcodes `tracker.db` | `scanner_engine.py:22` | Ignores `DATABASE_PATH`, unlike every other module (`ath_scanner.py:16` respects it). Setting `DATABASE_PATH` splits the app across two databases — routes read one, the scanner writes the other. |
+| Scanner tables are global, not user-scoped | `ath_tracking_table` (no `user_id`), `save_scan_results` (`DELETE FROM ath_scanning_results` with no filter) | Two users scanning concurrently overwrite each other's results. Fine for the single-user deployment; a blocker for the 50-user signup cap the app advertises. |
+| `/manual-archive` flashes a count from a `None` return | `app.py:1033`, `daily_tasks.py:114` | `perform_archive_for_user` returns nothing, so the success message always reports `None` archived. Cosmetic. |
