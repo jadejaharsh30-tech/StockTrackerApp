@@ -19,13 +19,18 @@ python init_profit_history.py   # create profit_history table (ATH profit scan)
 python app.py                   # runs Flask dev server on :5000 (debug=True, use_reloader=False)
 ```
 
-Load reported profit history for the Dual/Growth scan (CSV or Excel, wide or long layout — see the module docstring):
+Load reported profit history for the Dual/Growth profit scan. The primary source is the colleague-maintained DuckDB feed (`financial_data.duckdb`, built daily by `build_db.py` from two Google Apps Script endpoints — 48 quarters and 15 years for ~5500 companies):
 
 ```bash
-python import_profit_history.py quarterly.xlsx --type Q
-python import_profit_history.py annual.xlsx --type A
-python import_profit_history.py <file> --dry-run   # parse and report without writing
+python import_profit_duckdb.py financial_data.duckdb            # primary path
+python import_profit_duckdb.py financial_data.duckdb --dry-run  # report, write nothing
+python import_profit_history.py <file.xlsx> --type Q            # fallback: CSV/Excel
 ```
+
+Run the DuckDB import after each `build_db.py` refresh. Three non-obvious things it handles, all verified against the real feed — do not "simplify" them away:
+- **`QL1`/`FYL1` are the NEWEST periods**, not the oldest (confirmed: `TTM == QL1+QL2+QL3+QL4` for 97.9% of full-history companies). The series is reversed on import, and the importer re-runs that check each time and warns if the feed's ordering ever flips.
+- **Oldest-end zeros are pre-listing padding**, not reported profits, and are trimmed. Left in, a rolling TTM straddling the boundary mixes real quarters with fake zeros, and for a loss-making company `0` becomes the all-time peak.
+- **`period_end` is a positional sequence** (`Q001` oldest … `Q048` newest), because the feed carries no dates and its columns shift every quarter. Each symbol's series is replaced wholesale on import. Don't mix these with date-labelled rows for the same symbol.
 
 `app.py` also calls `create_tables()` on startup, which creates the remaining tables (`stocks`, `profit_tracker`, `historical_log`, `watchlist`, `portfolios`, `holdings`, `fundamental_checklist`, `upload_previews`, `scoring_history`, `market_stats_history`, `stock_analytics_snapshot`) if missing — so a fresh `tracker.db` is bootstrapped just by running `app.py`.
 

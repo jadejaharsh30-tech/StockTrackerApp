@@ -152,7 +152,7 @@ def main():
             print("   ", r)
         return
 
-    init_profit_history()
+    init_profit_history(verbose=False)
     conn = get_db()
     try:
         conn.executemany(

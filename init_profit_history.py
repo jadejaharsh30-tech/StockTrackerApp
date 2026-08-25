@@ -25,7 +25,7 @@ def get_db():
     return conn
 
 
-def init_profit_history():
+def init_profit_history(verbose=True):
     conn = get_db()
     cursor = conn.cursor()
 
@@ -56,6 +56,8 @@ def init_profit_history():
     ''').fetchall()
     conn.close()
 
+    if not verbose:
+        return
     print("profit_history table ready.")
     if counts:
         for row in counts:

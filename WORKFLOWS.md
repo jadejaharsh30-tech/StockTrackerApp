@@ -308,3 +308,27 @@ Because it is a pure DB read, Phase 4 adds no network calls and runs in millisec
 **The scan never writes `profit_tracker.ath_profit`.** That column is the user's manual flag and feeds `get_investment_category`, the gate for the whole FUND/PROP/GO chain — silently recomputing it would change dashboard and archive output. Instead the scanner shows computed vs. manual side by side (a mismatch renders as `N → Y` in warning colour), and `POST /api/profit/apply-flag` applies the computed value only for explicitly selected symbols.
 
 **Req. Profit is a view filter, not a universe filter.** It filters already-loaded results client-side. Filtering the *input* universe would mean fetching fundamentals for all ~754 tracked symbols on every scan instead of the ~10–40 that actually hit ATH.
+
+### 7.8 Profit history data source
+
+`profit_history` is fed from a colleague-maintained pipeline, not from yfinance:
+
+```
+Two Google Apps Script endpoints  (yearly + quarterly, refreshed daily)
+        │  build_db.py
+        ▼
+financial_data.duckdb   quarterly(ACCORD CODE, NSE CODE, QL1..QL48)
+                        yearly(..., TTM, FYL1..FYL15, MCAP, TRADING/LISTING STATUS)
+                        classifications(SYMBOL, TAG_TYPE, TAG_VALUE)
+        │  import_profit_duckdb.py
+        ▼
+tracker.db :: profit_history(symbol, period_type, period_end, net_profit)
+```
+
+Measured against the real feed: 5525 companies, of which 3322 carry an `NSE CODE`; the import yields 2861 quarterly and 3294 annual series, covering **739 of the 754** tracked symbols. The 15 uncovered ones are corporate actions rather than gaps — TATAMOTORS now appears as `TMCV`/`TMPV`, PEL as `PIRAMALFIN`, and so on. (Those same names are also the zero-baseline rows in `ath_tracking_table` noted in §7.2, which is consistent: a renamed ticker stops resolving in both feeds at once.)
+
+Classification of the tracked universe on this data: **133 Dual, 175 Growth, 431 neither, 15 N/A** — and it disagrees with the hand-maintained `ath_profit` flag on 261 of 739 symbols, which is the gap the manual apply flow exists to let you review rather than silently overwrite.
+
+`profit_points` (surfaced in the UI tooltip) is the size of the window each verdict was judged against, so a `D` resting on 9 TTM points is visibly weaker than one resting on 45. The classifier returns `N/A` below `MIN_TTM_POINTS` (8 TTM points ≈ 11 quarters); `import_profit_duckdb.py` derives its "thin history" warning from that same constant so the two cannot drift apart.
+
+The `classifications` table (INDEX and INDUSTRY tags for 755 symbols) is not yet consumed by the app — it is a natural source for the sector mapping that `sector_manager.py` currently approximates from yfinance.
