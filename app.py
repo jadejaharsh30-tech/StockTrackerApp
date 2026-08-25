@@ -3297,9 +3297,16 @@ def run_new_scanner():
     # Ensure staging table exists with new schema
     init_scanning_results_table()
 
+    # Optional slack (%) below the profit peak when judging "at ATH"
+    payload = request.get_json(silent=True) or {}
+    try:
+        tolerance = float(payload.get('profit_tolerance', 0) or 0)
+    except (TypeError, ValueError):
+        tolerance = 0.0
+
     def task(user_id):
         try:
-            run_full_scan(tickers, user_id=user_id)
+            run_full_scan(tickers, user_id=user_id, profit_tolerance_pct=tolerance)
         except Exception as e:
             status_manager.set_status(user_id, False, 0, 0, f"Scan error: {str(e)}")
 
@@ -3338,6 +3345,67 @@ def get_scanner_results():
     """Fetch current scan results from staging table."""
     results = get_scan_results()
     return jsonify(results)
+
+@app.route('/api/profit/coverage', methods=['GET'])
+@login_required
+def profit_coverage():
+    """How many symbols have usable profit history loaded (for UI warnings)."""
+    from profit_scanner import get_coverage
+    return jsonify(get_coverage())
+
+@app.route('/api/profit/apply-flag', methods=['POST'])
+@login_required
+def apply_profit_flag():
+    """
+    Apply a scan-computed profit verdict to the user's manual
+    profit_tracker.ath_profit flag. Explicit, per-user action — the scan itself
+    never writes this column.
+
+    Body: {"symbols": ["SBIN", ...]}  — each is set from its computed flag
+    (D or G -> 'Y', otherwise 'N'). Symbols with an N/A verdict are skipped.
+    """
+    data = request.get_json(silent=True) or {}
+    symbols = [str(s).upper() for s in data.get('symbols', []) if s]
+    if not symbols:
+        return jsonify({'success': False, 'error': 'No symbols provided.'})
+
+    conn = get_db()
+    updated, skipped, missing = [], [], []
+    try:
+        placeholders = ','.join(['?'] * len(symbols))
+        rows = conn.execute(
+            f"SELECT symbol, profit_flag FROM ath_scanning_results WHERE symbol IN ({placeholders})",
+            symbols
+        ).fetchall()
+        verdicts = {r['symbol']: r['profit_flag'] for r in rows}
+
+        for symbol in symbols:
+            flag = verdicts.get(symbol)
+            if flag in (None, 'N/A'):
+                skipped.append(symbol)
+                continue
+            new_value = 'Y' if flag in ('D', 'G') else 'N'
+            cur = conn.execute(
+                'UPDATE profit_tracker SET ath_profit = ? WHERE symbol = ? AND user_id = ?',
+                (new_value, symbol, current_user.id)
+            )
+            if cur.rowcount:
+                updated.append({'symbol': symbol, 'ath_profit': new_value})
+            else:
+                missing.append(symbol)
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)})
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'updated': updated,
+        'updated_count': len(updated),
+        'skipped': skipped,
+        'not_in_profit_tracker': missing
+    })
 
 @app.route('/api/dashboard/stock-count', methods=['GET'])
 @login_required

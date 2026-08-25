@@ -15,7 +15,16 @@ pip install -r requirements.txt
 python init_base_tables.py      # create/ensure core tables (users, stock_data, scoring_history, scanner_state, fund_snapshots)
 python init_alerts_db.py        # create alerts table
 python init_sector_db.py        # create sector_scores / sector_risk_metrics / sector_alerts tables
+python init_profit_history.py   # create profit_history table (ATH profit scan)
 python app.py                   # runs Flask dev server on :5000 (debug=True, use_reloader=False)
+```
+
+Load reported profit history for the Dual/Growth scan (CSV or Excel, wide or long layout — see the module docstring):
+
+```bash
+python import_profit_history.py quarterly.xlsx --type Q
+python import_profit_history.py annual.xlsx --type A
+python import_profit_history.py <file> --dry-run   # parse and report without writing
 ```
 
 `app.py` also calls `create_tables()` on startup, which creates the remaining tables (`stocks`, `profit_tracker`, `historical_log`, `watchlist`, `portfolios`, `holdings`, `fundamental_checklist`, `upload_previews`, `scoring_history`, `market_stats_history`, `stock_analytics_snapshot`) if missing — so a fresh `tracker.db` is bootstrapped just by running `app.py`.
@@ -39,6 +48,7 @@ Because table creation is scattered (`init_base_tables.py`, `init_alerts_db.py`,
 - **`data_manager.py`** (`DataManager`) — central live-price/fundamentals fetch + SQLite caching layer (`stock_price_cache`, `stock_fundamental_cache`, `stock_history_cache`) wrapping `yfinance` batch calls. Most other modules that need a price go through this instead of calling `yfinance` directly.
 - **`scanner_engine.py`** / **`ath_scanner.py`** — the ATH breakout scanner. `scanner_engine.py` is the current 3-phase implementation (sync tickers from `profit_tracker` → batch-detect ATH hits → in-depth RS-outperformance/green-candle analysis), driven from `app.py`'s `/api/ath/*` and `/api/run-scanner` routes. `ath_scanner.py` (`ATHScanner` class) is an alternate/earlier scanner implementation — check which one a route actually calls before assuming both are live.
 - **`scanner_status.py`** (`ScannerStatusManager`) — persists scan progress to the `scanner_state` table so long-running scans survive across gunicorn worker processes (progress can't live in memory).
+- **`profit_scanner.py`** — Phase 4 of the scan: classifies each ATH hit as **Dual** (quarterly *and* TTM/yearly net profit at an all-time high) or **Growth** (TTM/yearly at ATH *and* latest quarter beats the year-ago quarter). Reads only the local `profit_history` table, so it costs no network calls. Populate that table with `init_profit_history.py` + `import_profit_history.py` (yfinance exposes only ~4–6 quarters, far too shallow for a real all-time high).
 - **`scoring_engine.py`** (`ScoringEngine`) — the "Turtle Wealth 4-Pillar" scoring model (Growth 30% / Quality 25% / Value 20% / Technical 25%), used by the fundamental analysis and Turtle Dashboard/Research features.
 - **`fundamental_analysis.py`** — per-symbol fundamentals + technicals (RSI, CAGR, std dev) built on `data_manager` and `sector_manager`.
 - **`sector_manager.py`** (`SectorManager`) / **`sector_analytics.py`** (`SectorAnalytics`) — sector-level PE/PB/EV-EBITDA baselines and sector index (`^CNXFIN` etc.) scoring/risk aggregation, backing the `/sectors` pages.

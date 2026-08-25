@@ -41,6 +41,13 @@ def init_scanning_results_table():
             ath_outperformance TEXT,
             current_rs REAL,
             ath_rs REAL,
+            profit_ttm_ath TEXT,
+            profit_qtr_ath TEXT,
+            profit_yoy TEXT,
+            profit_flag TEXT,
+            profit_basis TEXT,
+            profit_points INTEGER,
+            manual_ath_profit TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -72,12 +79,16 @@ def save_scan_results(results):
         conn.execute("DELETE FROM ath_scanning_results")
         for r in results:
             conn.execute("""
-                INSERT INTO ath_scanning_results 
-                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO ath_scanning_results
+                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs,
+                 profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points, manual_ath_profit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (r['symbol'], r['new_ath_price'], r['trigger_price'],
                   r['green_candle'], r['close_gt_ath'], r['ath_outperformance'],
-                  r.get('current_rs'), r.get('ath_rs')))
+                  r.get('current_rs'), r.get('ath_rs'),
+                  r.get('profit_ttm_ath'), r.get('profit_qtr_ath'), r.get('profit_yoy'),
+                  r.get('profit_flag'), r.get('profit_basis'), r.get('profit_points'),
+                  r.get('manual_ath_profit')))
         conn.commit()
         logger.info(f"Saved {len(results)} scan results to staging table.")
     finally:
@@ -418,14 +429,63 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
 
 # ====================== MAIN SCAN ORCHESTRATOR ======================
 
-def run_full_scan(tickers, progress_callback=None, user_id=None):
+def annotate_profit_flags(results, tolerance_pct=0.0, user_id=None):
+    """
+    Phase 4: attach Dual/Growth profit classification to each scan result.
+
+    Reads reported profit history from the local `profit_history` table (see
+    profit_scanner.py) and, for comparison, the user's existing manual
+    `profit_tracker.ath_profit` flag. Never overwrites the manual flag — the
+    UI surfaces both and lets the user apply the computed value per stock.
+    """
+    from profit_scanner import classify_many
+
+    symbols = [r['symbol'] for r in results]
+    verdicts = classify_many(symbols, tolerance_pct=tolerance_pct)
+
+    # Pull the user's current manual flags so the UI can show computed vs manual
+    manual = {}
+    try:
+        conn = sqlite3.connect(TRACKER_DB)
+        if user_id:
+            rows = conn.execute(
+                "SELECT symbol, ath_profit FROM profit_tracker WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT symbol, ath_profit FROM profit_tracker").fetchall()
+        manual = {r[0]: r[1] for r in rows}
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Could not read manual ath_profit flags: {e}")
+
+    classified = 0
+    for r in results:
+        v = verdicts.get(r['symbol'], {})
+        r['profit_ttm_ath'] = v.get('profit_ttm_ath', 'N/A')
+        r['profit_qtr_ath'] = v.get('profit_qtr_ath', 'N/A')
+        r['profit_yoy'] = v.get('profit_yoy', 'N/A')
+        r['profit_flag'] = v.get('profit_flag', 'N/A')
+        r['profit_basis'] = v.get('profit_basis')
+        r['profit_points'] = v.get('profit_points', 0)
+        r['manual_ath_profit'] = manual.get(r['symbol'])
+        if r['profit_flag'] in ('D', 'G'):
+            classified += 1
+
+    logger.info(f"Profit classification: {classified}/{len(results)} flagged D or G.")
+    return results
+
+
+def run_full_scan(tickers, progress_callback=None, user_id=None, profit_tolerance_pct=0.0):
     """
     Run the optimized full ATH scan using batch processing.
-    
+
     Args:
         tickers: List of bare ticker symbols (no .NS)
         progress_callback: Optional fn(progress, total, message) for UI updates
         user_id: Optional user_id to persist status in DB
+        profit_tolerance_pct: Slack (%) allowed below the profit peak when
+            judging "at ATH" (0 = must equal or exceed the peak)
     """
     from scanner_status import ScannerStatusManager
     status_manager = ScannerStatusManager()
@@ -566,6 +626,16 @@ def run_full_scan(tickers, progress_callback=None, user_id=None):
                 logger.error(f"Analysis failed for {symbol}: {e}")
     else:
         update_status(total, total, "No potential hits detected.")
+
+    # ── Phase 4: Profit ATH classification (Dual / Growth) ──
+    # Runs only over confirmed hits, and reads the local profit_history table,
+    # so it costs no network calls regardless of universe size.
+    if results:
+        update_status(total, total, f"Classifying profit history for {len(results)} hits...")
+        try:
+            annotate_profit_flags(results, tolerance_pct=profit_tolerance_pct, user_id=user_id)
+        except Exception as e:
+            logger.error(f"Profit classification failed: {e}")
 
     # Save to staging table
     save_scan_results(results)

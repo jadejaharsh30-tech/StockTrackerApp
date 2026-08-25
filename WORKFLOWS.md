@@ -279,3 +279,32 @@ Each of these was confirmed against the shipped `tracker.db` schema, not inferre
 | `scanner_engine.py` hardcodes `tracker.db` | `scanner_engine.py:22` | Ignores `DATABASE_PATH`, unlike every other module (`ath_scanner.py:16` respects it). Setting `DATABASE_PATH` splits the app across two databases — routes read one, the scanner writes the other. |
 | Scanner tables are global, not user-scoped | `ath_tracking_table` (no `user_id`), `save_scan_results` (`DELETE FROM ath_scanning_results` with no filter) | Two users scanning concurrently overwrite each other's results. Fine for the single-user deployment; a blocker for the 50-user signup cap the app advertises. |
 | `/manual-archive` flashes a count from a `None` return | `app.py:1033`, `daily_tasks.py:114` | `perform_archive_for_user` returns nothing, so the success message always reports `None` archived. Cosmetic. |
+
+### 7.7 Phase 4 — profit ATH classification (Dual / Growth)
+
+Added after the four-strategy analysis. It answers: *of the stocks that hit a price ATH today, which also have profit at an all-time high?*
+
+**Definitions** (both require the TTM/yearly gate; `D`'s quarterly condition is strictly stronger than `G`'s, so the test is ordered D → G):
+
+| Flag | Condition |
+|---|---|
+| **D** (Dual) | latest quarter profit at ATH **AND** TTM/yearly profit at ATH |
+| **G** (Growth) | TTM/yearly profit at ATH **AND** latest quarter > same quarter last year |
+| `N` | TTM/yearly gate failed, or neither quarterly condition met |
+| `N/A` | not enough profit history loaded to judge |
+
+**Why a local table rather than yfinance.** `ticker.quarterly_financials` returns roughly 4–6 quarters and `ticker.financials` roughly 4 years. Rolling a 4-quarter TTM over ~5 points leaves 1–2 usable values, so `max()` is taken over almost nothing and "at ATH" comes out trivially true. (This is exactly the flaw in the older `analytics_engine.check_ath_profit`, which is still used by `/analytics`.) Phase 4 therefore reads a locally-loaded `profit_history` table instead:
+
+```
+profit_history(symbol, period_type 'Q'|'A', period_end, net_profit)
+```
+
+Because it is a pure DB read, Phase 4 adds no network calls and runs in milliseconds regardless of universe size.
+
+**Sign-safety.** The ATH test is `current >= peak - abs(peak) * tolerance`, not `current >= peak * (1 - tolerance)`. For a loss-making company whose peak is negative, the multiplicative form raises the bar *above* the peak and can never be satisfied. The existing `check_ath_profit` still has this bug.
+
+**Where the verdict goes.** `ath_scanning_results` gained `profit_ttm_ath`, `profit_qtr_ath`, `profit_yoy`, `profit_flag`, `profit_basis`, `profit_points`, `manual_ath_profit`. `init_scanning_results_table()` drops and recreates the table each run, so this schema change needed no migration.
+
+**The scan never writes `profit_tracker.ath_profit`.** That column is the user's manual flag and feeds `get_investment_category`, the gate for the whole FUND/PROP/GO chain — silently recomputing it would change dashboard and archive output. Instead the scanner shows computed vs. manual side by side (a mismatch renders as `N → Y` in warning colour), and `POST /api/profit/apply-flag` applies the computed value only for explicitly selected symbols.
+
+**Req. Profit is a view filter, not a universe filter.** It filters already-loaded results client-side. Filtering the *input* universe would mean fetching fundamentals for all ~754 tracked symbols on every scan instead of the ~10–40 that actually hit ATH.
