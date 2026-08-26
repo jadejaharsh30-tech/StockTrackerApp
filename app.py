@@ -2966,8 +2966,8 @@ def export_sectors_csv():
         headers={'Content-Disposition': f'attachment; filename=sector_rankings_{weight_type}.csv'}
     )
 
-from ath_scanner import ATHScanner # Import Scanner Status
-from scanner_engine import run_full_scan, get_profit_tracker_tickers, get_scan_results, init_scanning_results_table, promote_ath_eod
+from scanner_engine import (run_full_scan, get_profit_tracker_tickers, get_scan_results,
+                            init_scanning_results_table, promote_ath_eod, resync_ath_baselines)
 import threading 
 
 # --- ATH SCANNER ROUTES ---
@@ -2979,23 +2979,17 @@ def ath_scanner():
 @app.route('/api/ath/run-daily', methods=['POST'])
 @login_required
 def run_daily_scan():
-    """Trigger the fast daily scan in background."""
-    current_status = status_manager.get_status(current_user.id)
-    if current_status['running']:
-        return jsonify({'status': 'warning', 'message': 'Scan already in progress.'})
-        
-    def task(user_id):
-        scanner = ATHScanner()
-        try:
-            scanner.run_daily_scan(user_id=user_id)
-        except Exception as e:
-            status_manager.set_status(user_id, False, 0, 0, f"Error: {str(e)}")
-            
-    thread = threading.Thread(target=task, args=(current_user.id,))
-    thread.daemon = True
-    thread.start()
-    
-    return jsonify({'status': 'success', 'message': 'Scan started in background.'})
+    """
+    Retired. The legacy ATHScanner wrote today's high straight into the master
+    baseline, which bypasses the EOD-promote step the current workflow depends
+    on — and it referenced an `ath_price` column that no longer exists, so it
+    raised OperationalError on every call. Use /api/run-scanner instead.
+    """
+    return jsonify({
+        'status': 'error',
+        'message': "The legacy daily scan has been retired — use 'Run ATH Scan' instead. "
+                   "It promoted intraday highs immediately, bypassing EOD Sync."
+    }), 410
 
 @app.route('/api/ath/status', methods=['GET'])
 @login_required
@@ -3006,20 +3000,37 @@ def get_scan_status():
 @app.route('/api/ath/run-refresh', methods=['POST'])
 @login_required
 def run_weekend_refresh():
-    """Trigger the deep clean."""
-    if SCAN_STATUS['running']:
+    """
+    Re-validate ATH baselines from full history.
+
+    A normal scan only seeds symbols it has never seen, so a baseline that was
+    wrong when first seeded stays wrong. This recomputes it, excluding today's
+    candle so EOD-promote semantics are preserved.
+
+    Body: {"only_broken": true} limits it to missing/zero baselines (fast).
+    """
+    current_status = status_manager.get_status(current_user.id)
+    if current_status['running']:
         return jsonify({'status': 'warning', 'message': 'Scan/Refresh already in progress.'})
-        
-    scanner = ATHScanner()
-    
+
+    payload = request.get_json(silent=True) or {}
+    only_broken = bool(payload.get('only_broken', False))
+    tickers = get_profit_tracker_tickers(current_user.id)
+
+    if not only_broken and not tickers:
+        return jsonify({'status': 'error', 'message': 'No tickers found in profit tracker.'})
+
     def task(user_id):
         try:
-            scanner.run_weekend_refresh(user_id=user_id)
-        except: pass
-            
+            resync_ath_baselines(tickers, user_id=user_id, only_broken=only_broken)
+        except Exception as e:
+            status_manager.set_status(user_id, False, 0, 0, f"Refresh error: {str(e)}")
+
     thread = threading.Thread(target=task, args=(current_user.id,))
+    thread.daemon = True
     thread.start()
-    return jsonify({'status': 'success', 'message': 'Deep refresh started. Check terminal for progress.'})
+    scope = 'missing/zero baselines' if only_broken else f'{len(tickers)} tickers'
+    return jsonify({'status': 'success', 'message': f'Baseline refresh started for {scope}.'})
 
 @app.route('/api/ath/todays-results', methods=['GET'])
 @login_required
@@ -3031,20 +3042,24 @@ def get_ath_todays_results():
     
     # Query MASTER table for any stock where ath_date = today
     # This prevents manual edits with old dates from showing up.
+    # Column is `previous_ath` (there is no `ath_price` — referencing it made
+    # this endpoint raise OperationalError on every call). Rows staged by today's
+    # scan carry today_ath; rows already promoted carry ath_date = today.
     rows = conn.execute('''
-        SELECT symbol, ath_price, ath_date 
-        FROM ath_tracking_table 
-        WHERE ath_date = ? AND ignored = 0
+        SELECT symbol, previous_ath, today_ath, ath_date
+        FROM ath_tracking_table
+        WHERE (today_ath IS NOT NULL OR ath_date = ?) AND ignored = 0
     ''', (today_str,)).fetchall()
-    
+
     results = []
     for r in rows:
+        promoted = r['today_ath'] is None
         results.append({
             'symbol': r['symbol'],
-            'new_ath': r['ath_price'],
-            'prev_ath': 0.0, # Not strictly tracked in history in V2, simplified
-            'date': r['ath_date'],
-            'outperformance': 0.0 # simplified
+            'new_ath': r['previous_ath'] if promoted else r['today_ath'],
+            'prev_ath': r['previous_ath'],
+            'date': r['ath_date'] or today_str,
+            'promoted': promoted,
         })
     conn.close()
     return jsonify(results)
@@ -3345,6 +3360,17 @@ def get_scanner_results():
     """Fetch current scan results from staging table."""
     results = get_scan_results()
     return jsonify(results)
+
+@app.route('/api/scanner/reset', methods=['POST'])
+@login_required
+def reset_scanner_state():
+    """
+    Clear a stuck 'running' flag. If a worker dies mid-scan the flag is never
+    cleared and every later scan is refused; get_status auto-expires it after
+    30 minutes, this is the manual escape hatch.
+    """
+    status_manager.reset(current_user.id)
+    return jsonify({'status': 'success', 'message': 'Scanner state reset. You can run a scan now.'})
 
 @app.route('/api/profit/coverage', methods=['GET'])
 @login_required

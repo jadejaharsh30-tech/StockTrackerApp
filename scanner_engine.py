@@ -19,9 +19,17 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TRACKER_DB = os.path.join(BASE_DIR, 'tracker.db')
+# Honour DATABASE_PATH like app.py/daily_tasks.py/scanner_status.py do — without
+# this the scanner writes to a different database than the routes read from.
+TRACKER_DB = os.environ.get('DATABASE_PATH', os.path.join(BASE_DIR, 'tracker.db'))
 LOOKBACK = 211
 BATCH_SIZE = 50
+
+# Progress is split across phases so the bar keeps moving through the slow
+# in-depth work instead of pinning at 100% once price download finishes.
+PHASE2_SHARE = 0.75   # batch price download
+PHASE3_SHARE = 0.20   # RS / green-candle analysis of hits
+# remaining 0.05 = phase 4 profit classification
 
 
 # ====================== DATABASE HELPERS ======================
@@ -186,14 +194,25 @@ def sync_new_stocks_to_ath_tracker(tickers, progress_callback=None):
     conn = sqlite3.connect(TRACKER_DB)
     try:
         existing = set(r[0] for r in conn.execute("SELECT symbol FROM ath_tracking_table").fetchall())
+        # A baseline of 0/NULL is a failed earlier sync, not a real lifetime high.
+        # Left alone it passes the `high >= previous_ath` filter forever and
+        # reports a bogus hit with a trigger price of 0 on every scan, so retry
+        # those alongside genuinely new tickers.
+        broken = set(r[0] for r in conn.execute(
+            "SELECT symbol FROM ath_tracking_table WHERE previous_ath IS NULL OR previous_ath <= 0"
+        ).fetchall())
     finally:
         conn.close()
 
-    new_tickers = [t for t in tickers if t not in existing]
+    new_tickers = [t for t in tickers if t not in existing or t in broken]
 
     if not new_tickers:
         logger.info("No new stocks to sync.")
         return
+
+    retrying = len([t for t in new_tickers if t in broken])
+    if retrying:
+        logger.info(f"Retrying {retrying} symbols with a missing/zero baseline.")
 
     logger.info(f"Syncing {len(new_tickers)} new stocks into ATH tracker...")
     if progress_callback:
@@ -248,9 +267,18 @@ def sync_new_stocks_to_ath_tracker(tickers, progress_callback=None):
     conn = sqlite3.connect(TRACKER_DB)
     try:
         for symbol, ath_price in new_entries:
+            # Insert new symbols; for existing rows only fill in a baseline that
+            # is still missing/zero. A good baseline is never overwritten here —
+            # promotion of a real new high is the EOD promote step's job.
             conn.execute("""
-                INSERT OR IGNORE INTO ath_tracking_table (symbol, previous_ath, exchange, last_updated)
+                INSERT INTO ath_tracking_table (symbol, previous_ath, exchange, last_updated)
                 VALUES (?, ?, 'NSE', ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    previous_ath = excluded.previous_ath,
+                    last_updated = excluded.last_updated
+                WHERE (ath_tracking_table.previous_ath IS NULL
+                       OR ath_tracking_table.previous_ath <= 0)
+                  AND excluded.previous_ath > 0
             """, (symbol, ath_price, time.time()))
         conn.commit()
         logger.info(f"Synced {len(new_entries)} new stocks into ATH tracker.")
@@ -429,6 +457,102 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
 
 # ====================== MAIN SCAN ORCHESTRATOR ======================
 
+def resync_ath_baselines(tickers, progress_callback=None, user_id=None, only_broken=False):
+    """
+    Recompute previous_ath from full history for tickers already in the tracker.
+
+    Phase 1 of a normal scan only seeds symbols it has never seen, so a baseline
+    that was wrong at seed time stays wrong forever. This is the periodic
+    re-validation the (broken) legacy 'weekend refresh' was meant to provide.
+
+    Unlike the legacy scanner it does NOT promote today's high: the lifetime max
+    is computed excluding today's candle, so the EOD-promote discipline that the
+    rest of the workflow depends on is preserved.
+
+    only_broken=True limits the work to rows whose baseline is missing or <= 0.
+    """
+    from scanner_status import ScannerStatusManager
+    status_manager = ScannerStatusManager()
+
+    def update(progress, total, message, running=True):
+        if progress_callback:
+            progress_callback(progress, total, message)
+        if user_id:
+            status_manager.set_status(user_id, running, progress, total, message)
+
+    conn = sqlite3.connect(TRACKER_DB)
+    try:
+        if only_broken:
+            targets = [r[0] for r in conn.execute(
+                "SELECT symbol FROM ath_tracking_table "
+                "WHERE previous_ath IS NULL OR previous_ath <= 0").fetchall()]
+        else:
+            targets = list(tickers)
+    finally:
+        conn.close()
+
+    total = len(targets)
+    if not total:
+        update(0, 0, "No baselines needed refreshing.", running=False)
+        return {'checked': 0, 'updated': 0, 'failed': []}
+
+    updated, failed = 0, []
+    batches = [targets[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
+    today = pd.Timestamp.now().normalize()
+
+    for i, batch in enumerate(batches):
+        update(i * BATCH_SIZE, total, f"Refreshing baselines {i+1}/{len(batches)}...")
+        try:
+            data = yf.download([f"{s}.NS" for s in batch], period="max",
+                               interval="1d", auto_adjust=False, progress=False)
+        except Exception as e:
+            logger.error(f"Baseline refresh batch failed: {e}")
+            failed.extend(batch)
+            continue
+        if data.empty:
+            failed.extend(batch)
+            continue
+
+        conn = sqlite3.connect(TRACKER_DB)
+        try:
+            for symbol in batch:
+                yf_sym = f"{symbol}.NS"
+                try:
+                    if isinstance(data.columns, pd.MultiIndex):
+                        if yf_sym not in data.columns.get_level_values(1):
+                            failed.append(symbol)
+                            continue
+                        highs = data['High'][yf_sym].dropna()
+                    else:
+                        highs = data['High'].dropna()
+                    hist = highs[highs.index.normalize() < today]
+                    if hist.empty:
+                        failed.append(symbol)
+                        continue
+                    lifetime = float(hist.max())
+                    if lifetime <= 0:
+                        failed.append(symbol)
+                        continue
+                    conn.execute(
+                        """UPDATE ath_tracking_table
+                           SET previous_ath = ?, last_updated = ?
+                           WHERE symbol = ?""",
+                        (lifetime, time.time(), symbol))
+                    updated += 1
+                except Exception:
+                    failed.append(symbol)
+            conn.commit()
+        finally:
+            conn.close()
+
+    msg = f"Baseline refresh complete. {updated} updated"
+    if failed:
+        msg += f", {len(failed)} unresolved (likely renamed/delisted)"
+    update(total, total, msg + ".", running=False)
+    logger.info(msg)
+    return {'checked': total, 'updated': updated, 'failed': failed}
+
+
 def annotate_profit_flags(results, tolerance_pct=0.0, user_id=None):
     """
     Phase 4: attach Dual/Growth profit classification to each scan result.
@@ -532,9 +656,10 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
     batches = [tickers[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
     
     potential_hits = {}  # symbol -> live_candle_dict
+    unresolved = []      # symbols with no usable baseline
 
     for i, batch in enumerate(batches):
-        processed_count = i * BATCH_SIZE
+        processed_count = int(i * BATCH_SIZE * PHASE2_SHARE)
         update_status(processed_count, total, f"Batch {i+1}/{len(batches)}: Downloading prices...")
 
         # Add .NS suffix for batch download
@@ -570,7 +695,15 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
 
                     # Fast Filter: Compare against previous_ath from ath_tracking_table
                     current_ath = ath_map.get(symbol, 0.0)
-                    
+
+                    # No usable baseline (sync failed — typically a renamed or
+                    # delisted ticker). Any price beats 0, so without this guard
+                    # the symbol is reported as an ATH hit with trigger price 0
+                    # on every single scan.
+                    if current_ath <= 0:
+                        unresolved.append(symbol)
+                        continue
+
                     if round(live_high, 2) >= round(current_ath, 2):
                         potential_hits[symbol] = {
                             'High': live_high,
@@ -585,7 +718,14 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
 
     # ── Phase 3: In-depth 4-strategy analysis for potential hits ──
     total_hits = len(potential_hits)
-    update_status(total, total, f"Detected {total_hits} potential hits. Analyzing (Batch Fetching History)...")
+    phase3_base = int(total * PHASE2_SHARE)
+    if unresolved:
+        logger.warning(
+            f"{len(unresolved)} symbols skipped — no usable ATH baseline "
+            f"(likely renamed/delisted): {', '.join(unresolved[:10])}"
+        )
+    update_status(phase3_base, total,
+                  f"Detected {total_hits} potential hits. Analyzing (Batch Fetching History)...")
 
     if total_hits > 0:
         # Batch Fetch 1y history for all hits to avoid 1-by-1 overhead
@@ -600,7 +740,9 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
         for i, symbol in enumerate(hit_symbols):
             try:
                 live_candle = potential_hits[symbol]
-                update_status(total, total, f"Analyzing {symbol} ({i+1}/{total_hits})")
+                update_status(
+                    phase3_base + int(total * PHASE3_SHARE * (i + 1) / max(total_hits, 1)),
+                    total, f"Analyzing {symbol} ({i+1}/{total_hits})")
                 
                 # Extract history for this specific ticker from the batch
                 history_closes = None
@@ -625,13 +767,14 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
             except Exception as e:
                 logger.error(f"Analysis failed for {symbol}: {e}")
     else:
-        update_status(total, total, "No potential hits detected.")
+        update_status(phase3_base, total, "No potential hits detected.")
 
     # ── Phase 4: Profit ATH classification (Dual / Growth) ──
     # Runs only over confirmed hits, and reads the local profit_history table,
     # so it costs no network calls regardless of universe size.
     if results:
-        update_status(total, total, f"Classifying profit history for {len(results)} hits...")
+        update_status(int(total * (PHASE2_SHARE + PHASE3_SHARE)), total,
+                      f"Classifying profit history for {len(results)} hits...")
         try:
             annotate_profit_flags(results, tolerance_pct=profit_tolerance_pct, user_id=user_id)
         except Exception as e:
