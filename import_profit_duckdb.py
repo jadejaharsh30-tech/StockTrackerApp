@@ -42,14 +42,15 @@ except ImportError:
     sys.exit("duckdb is required:  pip install duckdb")
 
 from init_profit_history import get_db, init_profit_history
-from profit_scanner import MIN_TTM_POINTS, QUARTERS_PER_YEAR
+from profit_scanner import MIN_QUARTERS_FOR_ATH
 
 N_QUARTERS = 48
 N_YEARS = 15
 
-# Quarters needed before the classifier will return a verdict rather than N/A:
-# a rolling 4-quarter TTM over Q quarters yields Q-3 points.
-MIN_QUARTERS_FOR_VERDICT = MIN_TTM_POINTS + QUARTERS_PER_YEAR - 1
+# Quarters needed before the quarterly-ATH leg is meaningful. TTM itself only
+# needs 4 quarters now (it is computed once, not rolled) and is judged against
+# the reported FY series instead.
+MIN_QUARTERS_FOR_VERDICT = MIN_QUARTERS_FOR_ATH
 
 
 def trim_padding(values):

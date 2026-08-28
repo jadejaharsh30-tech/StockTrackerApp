@@ -332,3 +332,51 @@ Classification of the tracked universe on this data: **133 Dual, 175 Growth, 431
 `profit_points` (surfaced in the UI tooltip) is the size of the window each verdict was judged against, so a `D` resting on 9 TTM points is visibly weaker than one resting on 45. The classifier returns `N/A` below `MIN_TTM_POINTS` (8 TTM points ≈ 11 quarters); `import_profit_duckdb.py` derives its "thin history" warning from that same constant so the two cannot drift apart.
 
 The `classifications` table (INDEX and INDUSTRY tags for 755 symbols) is not yet consumed by the app — it is a natural source for the sector mapping that `sector_manager.py` currently approximates from yfinance.
+
+### 7.9 TTM-at-ATH: reported financial years, not rolling windows
+
+Phase 4's TTM leg went through one correction worth recording, because the
+naive implementation is subtly wrong and its output looks plausible.
+
+**Deprecated approach.** Build 45 rolling 4-quarter windows across QL1..QL48
+(1-4, 2-5, 3-6, …) and check whether the current window is the largest. The
+flaw: a window such as QL3..QL6 spans Sep-24 through Jun-25 — two part-years,
+a period the company never reported to anyone. A "record" found inside such a
+window is an artifact of where the window happens to sit.
+
+**Current approach.** Compute TTM **once** from the four most recent quarters
+(`QL1+QL2+QL3+QL4`), then compare that single figure against the reported
+financial-year series. The comparison run is `[TTM, FY1 … FY15]`; TTM is at
+ATH when it is `>=` every FY **and** the peak FY is positive (a loss-making
+peak is not a record to beat). Quarter-at-ATH is unchanged: `QL1` against
+`max(QL1..QL48)`.
+
+Edge case: when QL1 is the March quarter, QL1..QL4 spans exactly one financial
+year, so TTM equals FY1. The test uses `>=`, so equality passes — it fails only
+if an *earlier* FY beat it.
+
+**Why this matters in practice.** Two real cases from the tracked universe:
+
+| Symbol | TTM | Max rolling window | Peak reported FY | Old verdict | New verdict |
+|---|---|---|---|---|---|
+| NESTLEIND | 3,697 | 3,697 (current = max) | **3,928** | at ATH ✗ | not at ATH ✓ |
+| BHEL | 2,432 | 2,432 (current = max) | **7,087** | at ATH ✗ | not at ATH ✓ |
+
+Nestlé changed its year-end (Dec→Mar), so the 3,928 year spanned more than four
+quarters and no rolling window can ever reach it. BHEL's peak sits ~15 years
+back, beyond the 12-year quarterly series but inside the 15-year FY series.
+The rolling method called a company earning a third of its historical peak
+"profit at ATH"; the FY comparison catches both.
+
+Because the FY series (15y) reaches further back than the quarterly series
+(12y), comparing against reported FYs is not merely more principled — it sees
+history the rolling method structurally cannot.
+
+Distribution on the tracked universe after the change: **144 Dual, 188 Growth,
+406 neither, 16 N/A** (was 133 / 175 / 431 / 15). The new rule is *less*
+restrictive overall, because the phantom peaks the rolling windows invented
+were suppressing legitimate records — while still correctly rejecting the four
+symbols above that the old rule wrongly passed.
+
+`ath_scanning_results` carries `profit_ttm` and `profit_peak_fy` so every
+verdict is auditable from the UI tooltip.

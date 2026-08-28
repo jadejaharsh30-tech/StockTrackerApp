@@ -605,15 +605,18 @@
 
     function profitBadge(row) {
         const flag = row.profit_flag || 'N/A';
-        const basis = row.profit_basis ? `${row.profit_basis}, ${row.profit_points} pts` : 'no history loaded';
+        const fmt = n => (n === null || n === undefined) ? '?' : Number(n).toLocaleString(undefined, {maximumFractionDigits: 0});
+        const basis = row.profit_basis
+            ? `TTM ${fmt(row.profit_ttm)} vs peak of ${row.profit_points} reported FYs (${fmt(row.profit_peak_fy)})`
+            : 'no profit history loaded';
         if (flag === 'D') {
-            return `<span class="badge-y" title="Dual — quarterly AND TTM/yearly profit at ATH (${basis})">DUAL</span>`;
+            return `<span class="badge-y" title="Dual — latest quarter at ATH AND TTM at ATH. ${basis}">DUAL</span>`;
         }
         if (flag === 'G') {
-            return `<span class="badge-y" style="background:#0ea5e9;" title="Growth — TTM/yearly at ATH, quarter beats YoY (${basis})">GROWTH</span>`;
+            return `<span class="badge-y" style="background:#0ea5e9;" title="Growth — TTM at ATH and latest quarter beats the year-ago quarter. ${basis}">GROWTH</span>`;
         }
         if (flag === 'N') {
-            return `<span class="badge-n" title="Profit conditions not met (${basis})">—</span>`;
+            return `<span class="badge-n" title="Profit conditions not met. ${basis}">—</span>`;
         }
         return `<span class="badge-na" title="No usable profit history for this symbol">N/A</span>`;
     }
@@ -733,7 +736,7 @@
                     <th>Curr RS</th>
                     <th>ATH RS</th>
                     <th title="Dual = quarterly AND TTM/yearly profit at ATH. Growth = TTM/yearly at ATH and latest quarter beats the year-ago quarter.">Profit</th>
-                    <th title="TTM (or annual) profit at all-time high">TTM ATH</th>
+                    <th title="TTM (latest 4 quarters, computed once) compared against every reported financial year">TTM ATH</th>
                     <th title="Latest reported quarter's profit at all-time high">Qtr ATH</th>
                     <th title="Latest quarter vs same quarter last year">Qtr YoY</th>
                     <th title="Your current manual ath_profit flag in Profit Manager">Manual</th>

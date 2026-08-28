@@ -5,15 +5,48 @@ Runs as Phase 4 of the ATH scan, over the symbols that hit a price ATH today.
 Reads exclusively from the local `profit_history` table (no network), so it is
 fast enough to run on every scan and testable offline.
 
-Definitions (as specified by the user):
+Definitions:
 
-    Dual   (D) = latest QUARTER profit at ATH  AND  TTM/yearly profit at ATH
-    Growth (G) = TTM/yearly profit at ATH      AND  latest quarter > year-ago quarter
+    Dual   (D) = latest QUARTER at ATH  AND  TTM at ATH
+    Growth (G) = TTM at ATH             AND  latest quarter > year-ago quarter
 
-Both buckets require TTM/yearly to be at an ATH. They differ only in the
-quarterly leg, and D's condition is strictly stronger than G's (a quarter at
-ATH necessarily beats the year-ago quarter), so classification is ordered:
-test D first, then G.
+Both buckets require TTM to be at an ATH. They differ only in the quarterly
+leg, and D's condition is strictly stronger than G's (a quarter at ATH
+necessarily beats the year-ago quarter), so D is tested first.
+
+TTM-at-ATH — the important subtlety
+-----------------------------------
+TTM is computed ONCE from the four most recent quarters (QL1+QL2+QL3+QL4) and
+compared against the REPORTED financial-year series. The comparison run is:
+
+    [TTM, FY1, FY2, ... FY15]
+
+TTM is at ATH when it is >= every FY in that run AND the peak FY is positive
+(a loss-making peak is not a record).
+
+This is deliberately NOT a rolling 4-quarter maximum. A rolling window like
+QL3..QL6 spans two part-years — Sep-24 through Jun-25, say — which is not a
+period the company ever reported. A "record" inside such a window is an
+artifact of where the window sits, not a result the business actually posted.
+
+Quarter-at-ATH is separate and unchanged: QL1 against max(QL1..QL48).
+
+Worked example
+--------------
+    QL1=120 QL2=110 QL3=100 QL4=95 QL5=118 QL6=90 QL7=85 QL8=80
+    FY1=423 FY2=380 FY3=410 FY4=300
+
+    TTM = 120+110+100+95 = 425   (computed once, not rolled)
+    425 >= max(FY) = 423         -> TTM at ATH
+    QL1 120 >= max(QL) = 120     -> quarter at ATH
+    => Dual
+
+    With FY3 = 450 instead: 425 < 450 -> TTM not at ATH -> overall False,
+    even though the quarter is still a record on its own.
+
+Edge case: when QL1 is the March quarter, QL1..QL4 spans exactly one financial
+year, so TTM equals FY1. The test uses >=, so equality passes — it only fails
+if an EARLIER FY beat it.
 """
 
 import os
@@ -25,9 +58,13 @@ DATABASE = os.environ.get(
 )
 
 # Minimum series lengths before a verdict is meaningful.
-MIN_TTM_POINTS = 8      # rolling-4 TTM values needed to call an "all-time" high
-MIN_ANNUAL_POINTS = 3   # annual fallback when quarterly history is too short
 QUARTERS_PER_YEAR = 4
+MIN_ANNUAL_POINTS = 3    # reported FYs needed before "all-time" means anything
+MIN_QUARTERS_FOR_ATH = 8 # quarters needed before quarter-at-ATH is meaningful
+
+# Retained only because import_profit_duckdb.py derives its "thin history"
+# warning from it. TTM itself is no longer a rolling series.
+MIN_TTM_POINTS = QUARTERS_PER_YEAR
 
 NA = 'N/A'
 
@@ -53,13 +90,19 @@ def get_series(conn, symbol, period_type):
 
 
 def compute_ttm(quarterly_values):
-    """Rolling 4-quarter sum. Input oldest->newest; output oldest->newest."""
+    """
+    Trailing twelve months from the FOUR MOST RECENT quarters, computed once.
+
+    Deliberately NOT a rolling series. A rolling window such as QL3..QL6 spans
+    two part-years (e.g. Sep-24 to Jun-25) — a period the company never
+    reported to anyone — so a "record" found inside one is an artifact of where
+    the window happens to sit rather than a result the business actually posted.
+
+    Input is oldest->newest, so the newest four are the tail.
+    """
     if len(quarterly_values) < QUARTERS_PER_YEAR:
-        return []
-    return [
-        sum(quarterly_values[i - QUARTERS_PER_YEAR + 1:i + 1])
-        for i in range(QUARTERS_PER_YEAR - 1, len(quarterly_values))
-    ]
+        return None
+    return sum(quarterly_values[-QUARTERS_PER_YEAR:])
 
 
 def _at_ath(series, tolerance_pct=0.0):
@@ -93,8 +136,10 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
         'profit_qtr_ath': NA,
         'profit_yoy': NA,
         'profit_flag': NA,
-        'profit_basis': None,     # 'TTM' | 'ANNUAL' | None
-        'profit_points': 0,       # size of the window the ATH was judged against
+        'profit_basis': None,     # 'FY' once the TTM-vs-FY comparison ran
+        'profit_points': 0,       # number of reported FYs TTM was judged against
+        'profit_ttm': None,       # the single TTM figure (QL1+QL2+QL3+QL4)
+        'profit_peak_fy': None,   # highest reported FY it had to beat
     }
 
     quarterly = get_series(conn, symbol, 'Q')
@@ -103,20 +148,23 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
     a_values = [v for _, v in annual]
 
     # --- TTM / yearly leg -------------------------------------------------
+    # TTM is computed once from the latest four quarters and compared against
+    # the REPORTED financial-year series: the run is [TTM, FY1 .. FY15].
+    # TTM is at ATH when it matches or beats every reported FY, and the peak FY
+    # must itself be positive — a loss-making peak is not a record to beat.
     ttm = compute_ttm(q_values)
-    if len(ttm) >= MIN_TTM_POINTS:
-        result['profit_ttm_ath'] = 'Y' if _at_ath(ttm, tolerance_pct) else 'N'
-        result['profit_basis'] = 'TTM'
-        result['profit_points'] = len(ttm)
-    elif len(a_values) >= MIN_ANNUAL_POINTS:
-        # Quarterly history too shallow for a trustworthy TTM ATH — fall back
-        # to the reported annual series.
-        result['profit_ttm_ath'] = 'Y' if _at_ath(a_values, tolerance_pct) else 'N'
-        result['profit_basis'] = 'ANNUAL'
+    result['profit_ttm'] = ttm
+    if ttm is not None and len(a_values) >= MIN_ANNUAL_POINTS:
+        peak_fy = max(a_values)
+        threshold = peak_fy - abs(peak_fy) * (tolerance_pct / 100.0)
+        result['profit_ttm_ath'] = 'Y' if (peak_fy > 0 and ttm >= threshold) else 'N'
+        result['profit_basis'] = 'FY'
         result['profit_points'] = len(a_values)
+        result['profit_peak_fy'] = peak_fy
 
     # --- quarterly ATH leg ------------------------------------------------
-    if len(q_values) >= MIN_TTM_POINTS:
+    # Latest quarter (QL1) against the whole quarterly history (QL1..QL48).
+    if len(q_values) >= MIN_QUARTERS_FOR_ATH:
         result['profit_qtr_ath'] = 'Y' if _at_ath(q_values, tolerance_pct) else 'N'
 
     # --- quarterly YoY leg ------------------------------------------------
@@ -132,6 +180,10 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
         result['profit_flag'] = 'D'          # both legs at ATH
     elif result['profit_yoy'] == 'Y':
         result['profit_flag'] = 'G'          # TTM at ATH + quarter beats YoY
+    elif result['profit_qtr_ath'] == NA and result['profit_yoy'] == NA:
+        # TTM qualifies but there is not enough quarterly history to judge
+        # either quarterly leg — that is unknown, not a failure.
+        result['profit_flag'] = NA
     else:
         result['profit_flag'] = 'N'
 

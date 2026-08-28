@@ -55,6 +55,8 @@ def init_scanning_results_table():
             profit_flag TEXT,
             profit_basis TEXT,
             profit_points INTEGER,
+            profit_ttm REAL,
+            profit_peak_fy REAL,
             manual_ath_profit TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -89,13 +91,15 @@ def save_scan_results(results):
             conn.execute("""
                 INSERT INTO ath_scanning_results
                 (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs,
-                 profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points, manual_ath_profit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points,
+                 profit_ttm, profit_peak_fy, manual_ath_profit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (r['symbol'], r['new_ath_price'], r['trigger_price'],
                   r['green_candle'], r['close_gt_ath'], r['ath_outperformance'],
                   r.get('current_rs'), r.get('ath_rs'),
                   r.get('profit_ttm_ath'), r.get('profit_qtr_ath'), r.get('profit_yoy'),
                   r.get('profit_flag'), r.get('profit_basis'), r.get('profit_points'),
+                  r.get('profit_ttm'), r.get('profit_peak_fy'),
                   r.get('manual_ath_profit')))
         conn.commit()
         logger.info(f"Saved {len(results)} scan results to staging table.")
@@ -592,6 +596,8 @@ def annotate_profit_flags(results, tolerance_pct=0.0, user_id=None):
         r['profit_flag'] = v.get('profit_flag', 'N/A')
         r['profit_basis'] = v.get('profit_basis')
         r['profit_points'] = v.get('profit_points', 0)
+        r['profit_ttm'] = v.get('profit_ttm')
+        r['profit_peak_fy'] = v.get('profit_peak_fy')
         r['manual_ath_profit'] = manual.get(r['symbol'])
         if r['profit_flag'] in ('D', 'G'):
             classified += 1
