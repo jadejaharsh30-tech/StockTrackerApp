@@ -395,6 +395,12 @@
                 <span class="spinner" id="spinEod" style="border-top-color: #fff; width: 14px; height: 14px;"></span>
                 EOD Sync 🌅
             </button>
+
+            <button class="scanner-btn btn-refresh" id="btnResetScanner" onclick="resetScanner()"
+                style="padding: 6px 12px; font-size: 0.85rem;"
+                title="Clear a stuck 'scan already in progress' state. Use this if a scan crashed or the server restarted mid-scan. Does not touch any of your data.">
+                Reset Scanner ♻️
+            </button>
         </div>
 
         <div id="statusText"
@@ -952,14 +958,46 @@
         area.innerHTML = html;
     }
 
-    async function runRefresh() {
-        // Offer the cheap targeted repair first — a full refresh re-downloads
-        // full history for every tracked symbol and takes several minutes.
-        const onlyBroken = confirm(
-            "Refresh ATH baselines.\n\n" +
-            "OK    = only symbols with a missing/zero baseline (fast, fixes false triggers)\n" +
-            "Cancel = ALL tracked symbols (re-downloads full history, several minutes)");
+    // Clear a stuck "scan already in progress" flag. Touches only scanner_state.
+    async function resetScanner() {
+        if (!confirm("Reset the scanner's running state?\n\n" +
+                     "Use this only if a scan crashed or the server restarted while one was " +
+                     "running, and the scanner now refuses to start.\n\n" +
+                     "This does NOT touch your ATH baselines, scan results, or any other data.")) return;
+        const status = document.getElementById('statusText');
+        status.innerText = "Resetting scanner state...";
+        try {
+            const res = await fetch('/api/scanner/reset', { method: 'POST' });
+            const data = await res.json();
+            status.innerText = data.status === 'success'
+                ? "✅ " + data.message
+                : "⚠️ " + (data.message || 'Reset failed');
+            // Re-enable anything a dead scan left disabled
+            ['btnNewScan', 'btnRefresh', 'btnEodSync'].forEach(id => {
+                const b = document.getElementById(id); if (b) b.disabled = false;
+            });
+            ['spinNewScan', 'spinRefresh', 'spinEod'].forEach(id => {
+                const s = document.getElementById(id); if (s) s.style.display = 'none';
+            });
+            if (typeof scannerPollInterval !== 'undefined') clearInterval(scannerPollInterval);
+            if (typeof pollInterval !== 'undefined') clearInterval(pollInterval);
+        } catch (e) {
+            status.innerText = "Network error during reset.";
+        }
+    }
 
+    async function runRefresh() {
+        // Full re-validation of every tracked symbol's lifetime high. This is the
+        // one that matters after a gap — it does NOT promote today's high, so the
+        // EOD Sync step keeps its meaning.
+        if (!confirm(
+            "Refresh ATH baselines for ALL tracked symbols?\n\n" +
+            "Re-downloads full price history and recomputes each stock's lifetime high, " +
+            "EXCLUDING today's candle. Run this after a long gap, or your trigger prices " +
+            "will be stale.\n\n" +
+            "Takes several minutes. It does not promote today's high — only EOD Sync does that.")) return;
+
+        const onlyBroken = false;
         const btn = document.getElementById('btnRefresh');
         const status = document.getElementById('statusText');
         btn.disabled = true;
