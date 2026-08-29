@@ -190,6 +190,29 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
     return result
 
 
+def meets_criterion(verdict, criterion='D'):
+    """
+    Does this verdict satisfy the required profit criterion?
+
+    Dual is a strict subset of Growth — a quarter at an all-time high
+    necessarily beats the year-ago quarter — so:
+
+        criterion 'D' (Dual)   -> only D qualifies
+        criterion 'G' (Growth) -> D or G qualifies
+
+    Those are the only two meaningful settings: "either D or G" is just G, and
+    "G but not D" would exclude the strongest names.
+
+    Returns 'Y' / 'N', or 'N/A' when there is no usable profit history.
+    """
+    flag = verdict.get('profit_flag', NA)
+    if flag == NA:
+        return NA
+    if criterion == 'D':
+        return 'Y' if flag == 'D' else 'N'
+    return 'Y' if flag in ('D', 'G') else 'N'
+
+
 def classify_many(symbols, tolerance_pct=0.0, conn=None):
     """Classify a list of symbols. Returns {symbol: result_dict}."""
     own_conn = conn is None

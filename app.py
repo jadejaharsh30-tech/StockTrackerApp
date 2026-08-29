@@ -3319,9 +3319,16 @@ def run_new_scanner():
     except (TypeError, ValueError):
         tolerance = 0.0
 
+    # Required profit criterion, chosen before the scan. Only two are
+    # meaningful: Dual, or Growth (which subsumes Dual). Defaults to Dual.
+    criterion = str(payload.get('profit_criterion', 'D')).upper()[:1]
+    if criterion not in ('D', 'G'):
+        criterion = 'D'
+
     def task(user_id):
         try:
-            run_full_scan(tickers, user_id=user_id, profit_tolerance_pct=tolerance)
+            run_full_scan(tickers, user_id=user_id, profit_tolerance_pct=tolerance,
+                          profit_criterion=criterion)
         except Exception as e:
             status_manager.set_status(user_id, False, 0, 0, f"Scan error: {str(e)}")
 
@@ -3387,8 +3394,15 @@ def apply_profit_flag():
     profit_tracker.ath_profit flag. Explicit, per-user action — the scan itself
     never writes this column.
 
-    Body: {"symbols": ["SBIN", ...]}  — each is set from its computed flag
-    (D or G -> 'Y', otherwise 'N'). Symbols with an N/A verdict are skipped.
+    The flag tracks DUAL only — quarterly AND TTM both at an all-time high.
+    Growth (TTM at ATH with the quarter merely beating its year-ago comparator)
+    does NOT set it, because ath_profit gates the FUND category and that is
+    reserved for the strict condition. This is independent of whichever
+    criterion was chosen for the scan: selecting Growth widens what the scan
+    reports, not what qualifies as profit-at-ATH for portfolio classification.
+
+    Body: {"symbols": ["SBIN", ...]} — 'D' -> 'Y', anything else -> 'N'.
+    Symbols with an N/A verdict (no usable profit history) are skipped.
     """
     data = request.get_json(silent=True) or {}
     symbols = [str(s).upper() for s in data.get('symbols', []) if s]
@@ -3410,7 +3424,7 @@ def apply_profit_flag():
             if flag in (None, 'N/A'):
                 skipped.append(symbol)
                 continue
-            new_value = 'Y' if flag in ('D', 'G') else 'N'
+            new_value = 'Y' if flag == 'D' else 'N'
             cur = conn.execute(
                 'UPDATE profit_tracker SET ath_profit = ? WHERE symbol = ? AND user_id = ?',
                 (new_value, symbol, current_user.id)

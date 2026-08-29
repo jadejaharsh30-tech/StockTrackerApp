@@ -365,14 +365,12 @@
             <span style="font-size: 0.8rem; color: var(--text-muted);">%</span>
         </div>
 
-        <div style="display: flex; gap: 6px; align-items: center;" title="Filter the results table by computed profit verdict. This is a view filter — it never changes which stocks are scanned.">
+        <div style="display: flex; gap: 6px; align-items: center;" title="The profit condition a stock must meet to be marked 'At ATH' in this scan. Dual = latest quarter AND TTM both at an all-time high. Growth = TTM at ATH with the latest quarter beating its year-ago comparator; Growth includes every Dual stock. Chosen before the scan.">
             <label for="reqProfit" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600; line-height: 1.1;">Req.<br>Profit:</label>
-            <select id="reqProfit" onchange="renderScannerResults()"
+            <select id="reqProfit"
                 style="padding: 4px 6px; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); color: var(--text-color);">
-                <option value="ALL">Show all</option>
-                <option value="DG">Either (D or G)</option>
-                <option value="D">Dual Only</option>
-                <option value="G">Growth Only</option>
+                <option value="D" selected>Dual</option>
+                <option value="G">Growth (incl. Dual)</option>
             </select>
         </div>
 
@@ -487,7 +485,10 @@
             const response = await fetch('/api/run-scanner', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ profit_tolerance: tolEl ? parseFloat(tolEl.value) || 0 : 0 })
+                body: JSON.stringify({
+                    profit_tolerance: tolEl ? parseFloat(tolEl.value) || 0 : 0,
+                    profit_criterion: (document.getElementById('reqProfit') || {}).value || 'D'
+                })
             });
             const data = await response.json();
 
@@ -609,32 +610,45 @@
         return 'badge-na';
     }
 
+    // Single Profit column: does the stock meet the Req. Profit condition chosen
+    // for this scan? The component legs live in the tooltip so a verdict stays
+    // auditable without four extra columns.
     function profitBadge(row) {
-        const flag = row.profit_flag || 'N/A';
         const fmt = n => (n === null || n === undefined) ? '?' : Number(n).toLocaleString(undefined, {maximumFractionDigits: 0});
-        const basis = row.profit_basis
-            ? `TTM ${fmt(row.profit_ttm)} vs peak of ${row.profit_points} reported FYs (${fmt(row.profit_peak_fy)})`
-            : 'no profit history loaded';
-        if (flag === 'D') {
-            return `<span class="badge-y" title="Dual — latest quarter at ATH AND TTM at ATH. ${basis}">DUAL</span>`;
+        const crit = row.profit_criterion === 'G' ? 'Growth' : 'Dual';
+        const meets = row.profit_meets || 'N/A';
+
+        if (meets === 'N/A' || !row.profit_basis) {
+            return `<span class="badge-na" title="No usable profit history for this symbol — cannot judge.">N/A</span>`;
         }
-        if (flag === 'G') {
-            return `<span class="badge-y" style="background:#0ea5e9;" title="Growth — TTM at ATH and latest quarter beats the year-ago quarter. ${basis}">GROWTH</span>`;
-        }
-        if (flag === 'N') {
-            return `<span class="badge-n" title="Profit conditions not met. ${basis}">—</span>`;
-        }
-        return `<span class="badge-na" title="No usable profit history for this symbol">N/A</span>`;
+
+        const legs = [
+            `TTM at ATH: ${row.profit_ttm_ath}`,
+            `Quarter at ATH: ${row.profit_qtr_ath}`,
+            `Quarter vs year-ago: ${row.profit_yoy}`,
+            `TTM ${fmt(row.profit_ttm)} vs peak of ${row.profit_points} reported FYs (${fmt(row.profit_peak_fy)})`
+        ].join(' | ');
+        const detail = `Required: ${crit}. ${legs}`;
+
+        return meets === 'Y'
+            ? `<span class="badge-y" title="${detail}">At ATH</span>`
+            : `<span class="badge-n" title="${detail}">Not at ATH</span>`;
     }
 
+    // The manual ath_profit flag tracks DUAL only — it gates the FUND category,
+    // which is reserved for the strict condition. Growth never sets it, even when
+    // Growth was the scan's Req. Profit.
     function manualCell(row) {
         const manual = row.manual_ath_profit;
-        const computed = (row.profit_flag === 'D' || row.profit_flag === 'G') ? 'Y'
-                       : (row.profit_flag === 'N' ? 'N' : null);
+        const computed = row.profit_flag === 'D' ? 'Y'
+                       : ((row.profit_flag === 'N' || row.profit_flag === 'G') ? 'N' : null);
         if (manual === null || manual === undefined) return '<span title="Not in your Profit Manager">–</span>';
         if (computed === null) return manual;
-        if (manual === computed) return `${manual} <span title="Matches computed verdict">✓</span>`;
-        return `<b style="color: var(--warning-color);" title="Your manual flag (${manual}) differs from the computed verdict (${computed})">${manual} → ${computed}</b>`;
+        if (manual === computed) return `${manual} <span title="Matches the Dual test">✓</span>`;
+        const why = row.profit_flag === 'G'
+            ? 'computed Growth, not Dual — the flag tracks Dual only'
+            : `computed ${computed} on the Dual test`;
+        return `<b style="color: var(--warning-color);" title="Your manual flag is ${manual}; ${why}">${manual} → ${computed}</b>`;
     }
 
     // ====================== APPLY COMPUTED PROFIT FLAG ======================
@@ -646,9 +660,10 @@
         }
         const symbols = Array.from(checked).map(b => b.dataset.symbol);
         if (!confirm(
-            `Overwrite the manual "ATH Profit" flag in Profit Manager for ${symbols.length} stock(s) ` +
-            `with the computed verdict?\n\nThis changes your dashboard's FUND/PROP category and GO/WAIT ` +
-            `output for these stocks.`)) return;
+            `Overwrite the manual "ATH Profit" flag in Profit Manager for ${symbols.length} stock(s)?\n\n` +
+            `The flag is set from the strict DUAL test (quarter AND TTM both at ATH) — ` +
+            `Growth-only stocks are set to N, even if this scan required Growth.\n\n` +
+            `This changes your dashboard's FUND/PROP category and GO/WAIT output for these stocks.`)) return;
 
         const status = document.getElementById('statusText');
         status.innerText = 'Applying profit flags...';
@@ -679,12 +694,6 @@
         }
     }
 
-    function profitFilterPass(row, mode) {
-        if (mode === 'ALL') return true;
-        if (mode === 'DG') return row.profit_flag === 'D' || row.profit_flag === 'G';
-        return row.profit_flag === mode;
-    }
-
     function renderScannerResults(results) {
         const area = document.getElementById('resultsArea');
 
@@ -701,26 +710,7 @@
             return;
         }
 
-        const mode = (document.getElementById('reqProfit') || {}).value || 'ALL';
-        const filtered = allResults.filter(r => profitFilterPass(r, mode));
-
-        if (filtered.length === 0) {
-            const unclassified = allResults.filter(r => !r.profit_flag || r.profit_flag === 'N/A').length;
-            area.innerHTML =
-                '<div style="padding: 40px; text-align: center; color: var(--text-muted);">' +
-                `${allResults.length} ATH hit(s) found, but none match the "Req. Profit" filter.` +
-                (unclassified === allResults.length
-                    ? '<br><br><b>No profit history is loaded for these symbols.</b><br>' +
-                      'Run <code>python import_profit_history.py &lt;file&gt;</code> to load it, ' +
-                      'or set Req. Profit to "Show all".'
-                    : `<br><br>${unclassified} of them have no profit history loaded.`) +
-                '</div>';
-            document.getElementById('btnBulkAdd').style.display = 'none';
-            updateSelectedCount();
-            return;
-        }
-
-        const results_ = filtered;
+        const results_ = allResults;
 
         const wrapper = document.createElement('div');
         wrapper.style.maxHeight = '850px';
@@ -741,11 +731,8 @@
                     <th>Close > ATH</th>
                     <th>Curr RS</th>
                     <th>ATH RS</th>
-                    <th title="Dual = quarterly AND TTM/yearly profit at ATH. Growth = TTM/yearly at ATH and latest quarter beats the year-ago quarter.">Profit</th>
-                    <th title="TTM (latest 4 quarters, computed once) compared against every reported financial year">TTM ATH</th>
-                    <th title="Latest reported quarter's profit at all-time high">Qtr ATH</th>
-                    <th title="Latest quarter vs same quarter last year">Qtr YoY</th>
-                    <th title="Your current manual ath_profit flag in Profit Manager">Manual</th>
+                    <th id="thProfit" title="Whether the stock meets the Req. Profit condition selected for this scan.">Profit</th>
+                    <th title="Your current manual ath_profit flag in Profit Manager. Driven by the strict Dual test regardless of the scan criterion.">Manual</th>
                     <th style="width: 120px;">Stop Loss</th>
                 </tr>
             </thead>
@@ -767,9 +754,6 @@
                 <td style="color: var(--text-muted); font-size: 0.9rem;">${row.current_rs !== null ? row.current_rs : '-'}</td>
                 <td style="color: var(--text-muted); font-size: 0.9rem;">${row.ath_rs !== null ? row.ath_rs : '-'}</td>
                 <td>${profitBadge(row)}</td>
-                <td><span class="${badgeClass(row.profit_ttm_ath)}">${row.profit_ttm_ath || 'N/A'}</span></td>
-                <td><span class="${badgeClass(row.profit_qtr_ath)}">${row.profit_qtr_ath || 'N/A'}</span></td>
-                <td><span class="${badgeClass(row.profit_yoy)}">${row.profit_yoy || 'N/A'}</span></td>
                 <td style="font-size: 0.85rem; color: var(--text-muted);">${manualCell(row)}</td>
                 <td><input type="number" class="inline-input" step="0.05" placeholder="SL" data-field="stop_loss"></td>
             `;

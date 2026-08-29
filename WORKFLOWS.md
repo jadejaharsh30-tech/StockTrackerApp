@@ -380,3 +380,41 @@ symbols above that the old rule wrongly passed.
 
 `ath_scanning_results` carries `profit_ttm` and `profit_peak_fy` so every
 verdict is auditable from the UI tooltip.
+
+### 7.10 Req. Profit as a pre-scan criterion
+
+The profit verdict is presented as a **single binary column** rather than a
+four-way badge plus filters. The user picks **Req. Profit** *before* running the
+scan (default **Dual**), and the Profit column then reports only `At ATH` /
+`Not at ATH` against that criterion.
+
+Only two settings exist, and that is exhaustive rather than a simplification:
+**Dual is a strict subset of Growth**. A quarter at an all-time high necessarily
+beats its year-ago comparator, so every Dual stock also satisfies Growth —
+verified against the tracked universe, where 0 of 144 Dual companies fail the
+Growth leg. Consequently "either D or G" is identical to Growth, and "G but not
+D" would exclude precisely the strongest names. The former four-option
+post-scan filter (`Show all` / `Either` / `Dual Only` / `Growth Only`) collapsed
+to these two.
+
+The component legs (TTM-at-ATH, quarter-at-ATH, quarter-vs-year-ago, and the
+`TTM vs peak FY` figures) moved into the badge tooltip, so a verdict stays
+auditable without four extra columns.
+
+**`profit_tracker.ath_profit` tracks Dual only — deliberately decoupled from the
+scan criterion.** Apply Profit Flag sets `Y` for `D` and `N` for everything
+else, *even when the scan required Growth*. The rationale: `ath_profit` gates
+the FUND category through `get_investment_category`, and FUND is reserved for
+the strict condition. Choosing Growth widens what the scan reports; it does not
+widen what qualifies for portfolio classification.
+
+This produces one deliberate asymmetry worth knowing: under `Req. Profit =
+Growth`, a Growth-only stock shows **At ATH** in the Profit column while Apply
+Profit Flag still writes **N**. The Manual cell renders that as `N → N` with a
+tooltip reading "computed Growth, not Dual — the flag tracks Dual only", and the
+apply dialog states it too. Worked example (AETHER, Growth, quarter not at ATH):
+
+| Req. Profit | Profit column | Apply Profit Flag writes |
+|---|---|---|
+| Dual | Not at ATH | N |
+| Growth | **At ATH** | **N** |
