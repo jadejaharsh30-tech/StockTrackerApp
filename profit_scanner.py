@@ -59,11 +59,18 @@ DATABASE = os.environ.get(
 
 # Minimum series lengths before a verdict is meaningful.
 QUARTERS_PER_YEAR = 4
-MIN_ANNUAL_POINTS = 3    # reported FYs needed before "all-time" means anything
-MIN_QUARTERS_FOR_ATH = 8 # quarters needed before quarter-at-ATH is meaningful
 
-# Retained only because import_profit_duckdb.py derives its "thin history"
-# warning from it. TTM itself is no longer a rolling series.
+# No minimum-history gate. A company's all-time high is over its whole
+# existence, however short: if a recent listing has two reported FYs and its
+# TTM beats both, that IS a record for every year it has existed. Withholding a
+# verdict there invents a third state for something the criterion answers
+# perfectly well. Depth is disclosed via profit_points instead, so a verdict
+# resting on 2 FYs is visibly weaker than one resting on 15.
+MIN_ANNUAL_POINTS = 1     # need at least one reported FY to compare against
+MIN_QUARTERS_FOR_ATH = 1  # need at least one quarter to have a latest quarter
+
+# Retained because import_profit_duckdb.py imports it. TTM needs four quarters
+# for a structural reason — it is the sum of the latest four — not a quality bar.
 MIN_TTM_POINTS = QUARTERS_PER_YEAR
 
 NA = 'N/A'
@@ -181,10 +188,9 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
                                        'data feed, usually a renamed or demerged ticker')
         elif ttm is None:
             result['profit_reason'] = (f'only {len(q_values)} quarter(s) of history — '
-                                       f'{QUARTERS_PER_YEAR} are needed to compute TTM')
+                                       f'{QUARTERS_PER_YEAR} are needed to sum a TTM')
         else:
-            result['profit_reason'] = (f'only {len(a_values)} reported financial year(s) — '
-                                       f'{MIN_ANNUAL_POINTS} are needed to establish an all-time high')
+            result['profit_reason'] = ('no reported financial years to compare TTM against')
 
     # --- combine ----------------------------------------------------------
     if result['profit_ttm_ath'] == NA:

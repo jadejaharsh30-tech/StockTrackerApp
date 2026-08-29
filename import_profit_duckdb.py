@@ -42,15 +42,15 @@ except ImportError:
     sys.exit("duckdb is required:  pip install duckdb")
 
 from init_profit_history import get_db, init_profit_history
-from profit_scanner import MIN_QUARTERS_FOR_ATH
+from profit_scanner import QUARTERS_PER_YEAR
 
 N_QUARTERS = 48
 N_YEARS = 15
 
-# Quarters needed before the quarterly-ATH leg is meaningful. TTM itself only
-# needs 4 quarters now (it is computed once, not rolled) and is judged against
-# the reported FY series instead.
-MIN_QUARTERS_FOR_VERDICT = MIN_QUARTERS_FOR_ATH
+# The only structural limit left: TTM is the sum of the latest four quarters,
+# so fewer than four means no TTM and therefore no verdict. There is no
+# minimum-history quality bar — a short history still has an all-time high.
+MIN_QUARTERS_FOR_VERDICT = QUARTERS_PER_YEAR
 
 
 def trim_padding(values):
@@ -164,8 +164,8 @@ def main():
     print(f"  annual series   : {stats['a_symbols']} symbols")
     if stats['thin']:
         sample = ', '.join(stats['thin'][:8])
-        print(f"  ⚠ {len(stats['thin'])} symbols have <{MIN_QUARTERS_FOR_VERDICT} real quarters "
-              f"— verdict will be N/A "
+        print(f"  ⚠ {len(stats['thin'])} symbols have <{MIN_QUARTERS_FOR_VERDICT} real quarters, "
+              f"so no TTM can be summed "
               f"({sample}{'...' if len(stats['thin']) > 8 else ''})")
 
     if args.dry_run:

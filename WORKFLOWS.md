@@ -418,3 +418,34 @@ apply dialog states it too. Worked example (AETHER, Growth, quarter not at ATH):
 |---|---|---|
 | Dual | Not at ATH | N |
 | Growth | **At ATH** | **N** |
+
+### 7.11 No minimum-history gate
+
+An earlier version withheld a verdict below 3 reported FYs or 8 quarters,
+returning `N/A`. That was wrong, and RUBICON is the case that showed it:
+
+```
+quarters (oldest->newest): 34.48 38.07 36.25 43.30 53.85 72.80 76.79 84.78
+latest quarter 84.78 == max(all 8)          -> quarter at ATH
+TTM  = 84.78+76.79+72.80+53.85 = 288.22
+reported FYs: 134.36, 246.74  -> peak 246.74
+288.22 >= 246.74                            -> TTM at ATH
+=> DUAL
+```
+
+Both legs pass unambiguously. The only thing suppressing it was an arbitrary
+threshold. A company's all-time high is over its **whole existence**, however
+short — if a two-year-old listing's TTM beats both years it has reported, that
+is a record for every year it has existed. Withholding a verdict there invents
+uncertainty the criterion does not actually have.
+
+The thresholds are now 1 FY and 1 quarter — i.e. evaluate whenever any data
+exists. The single remaining limit is structural: TTM is the sum of the latest
+four quarters, so a symbol with fewer than four cannot produce one (58 in the
+feed). Depth is disclosed through `profit_points` in the tooltip, so a verdict
+resting on 2 FYs is visibly weaker than one resting on 15, rather than being
+silently withheld.
+
+After the change the only remaining un-evaluable symbols are the 15 with no
+feed coverage at all — the renamed/demerged tickers — and those display as
+`Not at ATH` per §7.10.
