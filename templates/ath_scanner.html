@@ -618,8 +618,13 @@
         const crit = row.profit_criterion === 'G' ? 'Growth' : 'Dual';
         const meets = row.profit_meets || 'N/A';
 
+        // Only two states are shown. Where the condition could not be evaluated
+        // the stock has not demonstrated profit at an all-time high, so it reads
+        // "Not at ATH" — the reason stays in the tooltip so a data gap is still
+        // discoverable rather than silently indistinguishable from a real fail.
         if (meets === 'N/A' || !row.profit_basis) {
-            return `<span class="badge-na" title="No usable profit history for this symbol — cannot judge.">N/A</span>`;
+            const why = row.profit_reason || 'no usable profit history for this symbol';
+            return `<span class="badge-n" title="Not evaluated: ${why}. Shown as Not at ATH because the condition is unproven.">Not at ATH</span>`;
         }
 
         const legs = [
@@ -643,7 +648,10 @@
         const computed = row.profit_flag === 'D' ? 'Y'
                        : ((row.profit_flag === 'N' || row.profit_flag === 'G') ? 'N' : null);
         if (manual === null || manual === undefined) return '<span title="Not in your Profit Manager">–</span>';
-        if (computed === null) return manual;
+        if (computed === null) {
+            const why = row.profit_reason || 'no usable profit history';
+            return `<span title="Not evaluated (${why}) — Apply Profit Flag leaves this unchanged">${manual}</span>`;
+        }
         if (manual === computed) return `${manual} <span title="Matches the Dual test">✓</span>`;
         const why = row.profit_flag === 'G'
             ? 'computed Growth, not Dual — the flag tracks Dual only'

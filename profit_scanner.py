@@ -140,6 +140,7 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
         'profit_points': 0,       # number of reported FYs TTM was judged against
         'profit_ttm': None,       # the single TTM figure (QL1+QL2+QL3+QL4)
         'profit_peak_fy': None,   # highest reported FY it had to beat
+        'profit_reason': None,    # why no verdict could be reached, if so
     }
 
     quarterly = get_series(conn, symbol, 'Q')
@@ -171,6 +172,20 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
     if len(q_values) >= QUARTERS_PER_YEAR + 1:
         result['profit_yoy'] = 'Y' if q_values[-1] > q_values[-1 - QUARTERS_PER_YEAR] else 'N'
 
+    # --- why no verdict, if that is the case ------------------------------
+    # Recorded so the UI can distinguish "we checked and it fails" from
+    # "we could not check", without needing a third badge state.
+    if result['profit_ttm_ath'] == NA:
+        if not q_values and not a_values:
+            result['profit_reason'] = ('no profit history for this symbol — it is not in the '
+                                       'data feed, usually a renamed or demerged ticker')
+        elif ttm is None:
+            result['profit_reason'] = (f'only {len(q_values)} quarter(s) of history — '
+                                       f'{QUARTERS_PER_YEAR} are needed to compute TTM')
+        else:
+            result['profit_reason'] = (f'only {len(a_values)} reported financial year(s) — '
+                                       f'{MIN_ANNUAL_POINTS} are needed to establish an all-time high')
+
     # --- combine ----------------------------------------------------------
     if result['profit_ttm_ath'] == NA:
         result['profit_flag'] = NA           # no usable history at all
@@ -184,6 +199,8 @@ def classify_symbol(conn, symbol, tolerance_pct=0.0):
         # TTM qualifies but there is not enough quarterly history to judge
         # either quarterly leg — that is unknown, not a failure.
         result['profit_flag'] = NA
+        result['profit_reason'] = (f'TTM qualifies, but only {len(q_values)} quarter(s) of '
+                                   f'history — cannot judge the quarterly leg')
     else:
         result['profit_flag'] = 'N'
 
