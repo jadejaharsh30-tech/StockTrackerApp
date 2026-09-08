@@ -449,3 +449,42 @@ silently withheld.
 After the change the only remaining un-evaluable symbols are the 15 with no
 feed coverage at all — the renamed/demerged tickers — and those display as
 `Not at ATH` per §7.10.
+
+### 7.12 Refresh Profit Data — live API → profit_history → flags
+
+`profit_feed.py` replaces the `build_db.py → financial_data.duckdb →
+import_profit_duckdb.py` chain for this app. The duckdb file was a staging post
+on the way to SQLite — the data paused there and moved on unchanged — and
+nothing here reads its `classifications` table, which was the only part
+requiring the colleague's `fetch_classifications` module.
+
+```
+two Apps Script endpoints ──► profit_feed.refresh() ──► profit_history
+                                                            │
+                          ┌─────────────────────────────────┴──────────────┐
+                          ▼                                                ▼
+              Phase 4 of Run ATH Scan                    preview → apply flags
+              → "At ATH / Not at ATH"                    → profit_tracker.ath_profit
+```
+
+**Mutual exclusion is the load-bearing part.** Both the refresh and the scan
+take `scanner_state.is_running`, so neither can start while the other runs.
+Without it a scan could read `profit_history` mid-rewrite and judge some stocks
+on old data and some on new — with no error, no partial-write marker, and a
+plausible-looking result table. Verified in both directions.
+
+**Preview then apply, with a real cancel.** The refresh always rewrites
+`profit_history` (reference data — safe, and wanted regardless). Only the write
+to `profit_tracker.ath_profit` is gated: the UI reports how many flags would
+change and in which direction, and Cancel leaves every flag untouched while
+keeping the refreshed data. That split matters because `ath_profit` gates the
+FUND category through `get_investment_category`, so applying moves stocks
+between trading categories in one shot.
+
+Symbols with no usable profit history are **never written** — the feed has no
+opinion on them, and several are renamed tickers it structurally cannot cover
+(TATAMOTORS → TMCV/TMPV). Overwriting would invent an opinion and silently drop
+them out of FUND.
+
+Applied flags follow the **Dual** test only, independent of the scan's Req.
+Profit setting — see §7.10.

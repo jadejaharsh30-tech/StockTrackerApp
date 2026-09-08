@@ -87,13 +87,20 @@ def get_db():
 
 def get_series(conn, symbol, period_type):
     """Return [(period_end, net_profit), ...] sorted oldest -> newest."""
-    rows = conn.execute(
-        '''SELECT period_end, net_profit FROM profit_history
-           WHERE symbol = ? AND period_type = ? AND net_profit IS NOT NULL
-           ORDER BY period_end ASC''',
-        (symbol.upper(), period_type)
-    ).fetchall()
-    return [(r['period_end'], float(r['net_profit'])) for r in rows]
+    try:
+        rows = conn.execute(
+            '''SELECT period_end, net_profit FROM profit_history
+               WHERE symbol = ? AND period_type = ? AND net_profit IS NOT NULL
+               ORDER BY period_end ASC''',
+            (symbol.upper(), period_type)
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # profit_history not created yet — behave as "no data" so callers get a
+        # clean N/A verdict rather than a 500.
+        return []
+    # Positional indexing so this works whether or not the caller's connection
+    # sets row_factory = sqlite3.Row.
+    return [(r[0], float(r[1])) for r in rows]
 
 
 def compute_ttm(quarterly_values):

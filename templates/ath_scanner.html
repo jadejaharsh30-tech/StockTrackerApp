@@ -374,6 +374,14 @@
             </select>
         </div>
 
+        <button class="scanner-btn btn-refresh" id="btnRefreshProfit" onclick="refreshProfitData()"
+            style="padding: 8px 14px;"
+            title="Pull fresh quarterly and yearly profit data from the two Google Sheets APIs, then show what it would change in Profit Manager before writing anything. Run this before a scan; it cannot run while a scan is in progress.">
+            <span class="spinner" id="spinRefreshProfit"
+                style="border-top-color: var(--text-color); width: 14px; height: 14px;"></span>
+            Refresh Profit Data 🔄
+        </button>
+
         <button class="scanner-btn btn-run-daily" id="btnNewScan" onclick="runNewScanner()" style="padding: 8px 16px;">
             <span class="spinner" id="spinNewScan"></span>
             Run ATH Scan ⚡
@@ -948,6 +956,120 @@
         });
         html += '</tbody></table>';
         area.innerHTML = html;
+    }
+
+    // ====================== REFRESH PROFIT DATA ======================
+    // Refresh profit_history from the two APIs, then show what that would change
+    // in Profit Manager and let the user apply or cancel. Cancelling leaves the
+    // refreshed data in place and the flags untouched.
+    let profitPollInterval = null;
+
+    async function refreshProfitData() {
+        const btn = document.getElementById('btnRefreshProfit');
+        const spin = document.getElementById('spinRefreshProfit');
+        const status = document.getElementById('statusText');
+
+        btn.disabled = true;
+        spin.style.display = 'inline-block';
+        status.innerText = "Starting profit data refresh...";
+        document.getElementById('progressContainer').style.display = 'block';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressBar').style.background = 'linear-gradient(90deg, #6366f1, #4f46e5)';
+
+        try {
+            const res = await fetch('/api/profit/refresh', { method: 'POST' });
+            const data = await res.json();
+            if (data.status !== 'success') {
+                status.innerText = "⚠️ " + data.message;
+                btn.disabled = false; spin.style.display = 'none';
+                return;
+            }
+            profitPollInterval = setInterval(pollProfitRefresh, 1500);
+        } catch (e) {
+            status.innerText = "Network error starting refresh.";
+            btn.disabled = false; spin.style.display = 'none';
+        }
+    }
+
+    async function pollProfitRefresh() {
+        try {
+            const res = await fetch('/api/scanner/status');
+            const s = await res.json();
+            document.getElementById('progressLabel').innerText = s.message || "Refreshing...";
+            const pct = s.total > 0 ? Math.round((s.progress / s.total) * 100) : 0;
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressPercent').innerText = pct + '%';
+
+            if (!s.running) {
+                clearInterval(profitPollInterval);
+                document.getElementById('btnRefreshProfit').disabled = false;
+                document.getElementById('spinRefreshProfit').style.display = 'none';
+                document.getElementById('statusText').innerText = s.message || "Refresh complete";
+
+                if ((s.message || '').toLowerCase().includes('failed')) return;
+                await showProfitFlagPreview();
+            }
+        } catch (e) { /* keep polling */ }
+    }
+
+    // Step 2: show the blast radius and let the user decide.
+    async function showProfitFlagPreview() {
+        const status = document.getElementById('statusText');
+        let pv;
+        try {
+            const res = await fetch('/api/profit/preview-flags');
+            pv = await res.json();
+        } catch (e) {
+            status.innerText = "Refresh done, but the flag preview failed to load.";
+            return;
+        }
+        if (!pv.success) {
+            status.innerText = "Refresh done. Preview error: " + (pv.error || 'unknown');
+            return;
+        }
+
+        if (!pv.changes || pv.changes.length === 0) {
+            status.innerText = `✅ Profit data refreshed. No ATH Profit flags need changing `
+                             + `(${pv.unchanged} already agree, ${pv.no_data_count} have no feed data).`;
+            return;
+        }
+
+        const sample = pv.changes.slice(0, 12)
+            .map(c => `   ${c.symbol}: ${c.from} → ${c.to}`).join('\n');
+        const more = pv.changes.length > 12 ? `\n   ...and ${pv.changes.length - 12} more` : '';
+
+        const ok = confirm(
+            `Profit data refreshed.\n\n` +
+            `${pv.changes.length} of your ${pv.total} tracked symbols would change their ` +
+            `"ATH Profit" flag:\n` +
+            `   ${pv.to_y} will become Y  (promoted into FUND)\n` +
+            `   ${pv.to_n} will become N  (demoted out of FUND)\n` +
+            `   ${pv.unchanged} already agree\n` +
+            `   ${pv.no_data_count} have no feed data and will NOT be touched\n\n` +
+            `${sample}${more}\n\n` +
+            `This changes your dashboard's FUND/PROP category and GO/WAIT output.\n\n` +
+            `OK = write these flags.   Cancel = write nothing (refreshed data is kept).`);
+
+        if (!ok) {
+            status.innerText = `Profit data refreshed. ${pv.changes.length} flag change(s) NOT applied.`;
+            return;
+        }
+
+        status.innerText = "Applying flag changes...";
+        try {
+            const res = await fetch('/api/profit/apply-all-flags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})           // no symbols = apply them all
+            });
+            const r = await res.json();
+            status.innerText = r.success
+                ? `✅ ${r.updated} flag(s) updated (${r.to_y} → Y, ${r.to_n} → N). `
+                  + `${r.skipped_no_data} skipped (no feed data).`
+                : "⚠️ " + (r.error || 'Apply failed');
+        } catch (e) {
+            status.innerText = "Network error applying flags.";
+        }
     }
 
     // Clear a stuck "scan already in progress" flag. Touches only scanner_state.

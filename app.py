@@ -3379,6 +3379,79 @@ def reset_scanner_state():
     status_manager.reset(current_user.id)
     return jsonify({'status': 'success', 'message': 'Scanner state reset. You can run a scan now.'})
 
+@app.route('/api/profit/refresh', methods=['POST'])
+@login_required
+def refresh_profit_data():
+    """
+    Pull fresh profit history from the two Apps Script endpoints into
+    profit_history, in a background thread.
+
+    Shares scanner_state with the ATH scan, so the two can never overlap: a scan
+    reading profit_history mid-rewrite would judge some stocks on old data and
+    some on new, silently. This route refuses to start while a scan is running,
+    and /api/run-scanner refuses while this is running.
+    """
+    current_status = status_manager.get_status(current_user.id)
+    if current_status['running']:
+        return jsonify({'status': 'warning',
+                        'message': 'A scan or refresh is already in progress.'})
+
+    def task(user_id):
+        from profit_feed import refresh
+        try:
+            status_manager.set_status(user_id, True, 0, 100,
+                                      "Starting profit data refresh...", force=True)
+            summary = refresh(progress_callback=lambda pct, msg:
+                              status_manager.set_status(user_id, True, pct, 100, msg))
+            msg = (f"Profit data refreshed: {summary['symbols']} symbols, "
+                   f"{summary['rows']} rows.")
+            if not summary['ordering_ok']:
+                msg += (" WARNING: TTM no longer matches QL1+QL2+QL3+QL4 — "
+                        "verify the sheet's column order before trusting verdicts.")
+            status_manager.set_status(user_id, False, 100, 100, msg, force=True)
+        except Exception as e:
+            status_manager.set_status(user_id, False, 0, 100,
+                                      f"Profit refresh failed: {e}", force=True)
+
+    thread = threading.Thread(target=task, args=(current_user.id,))
+    thread.daemon = True
+    thread.start()
+    return jsonify({'status': 'success', 'message': 'Profit data refresh started.'})
+
+
+@app.route('/api/profit/preview-flags', methods=['GET'])
+@login_required
+def preview_profit_flags():
+    """
+    What applying the computed Dual verdicts would change in
+    profit_tracker.ath_profit. Reads only — writes nothing.
+    """
+    from profit_feed import preview_flag_changes
+    try:
+        return jsonify({'success': True, **preview_flag_changes(current_user.id)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/profit/apply-all-flags', methods=['POST'])
+@login_required
+def apply_all_profit_flags():
+    """
+    Write the computed Dual verdict into profit_tracker.ath_profit for every
+    tracked symbol whose flag differs. Symbols with no usable profit history are
+    never written — the feed has no opinion on them, so overwriting would invent
+    one, and several are renamed tickers the feed cannot cover at all.
+    """
+    from profit_feed import apply_flag_changes
+    data = request.get_json(silent=True) or {}
+    symbols = data.get('symbols')          # None = apply every change
+    try:
+        result = apply_flag_changes(current_user.id, symbols=symbols)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 @app.route('/api/profit/coverage', methods=['GET'])
 @login_required
 def profit_coverage():

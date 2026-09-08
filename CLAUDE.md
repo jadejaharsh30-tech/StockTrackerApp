@@ -19,15 +19,19 @@ python init_profit_history.py   # create profit_history table (ATH profit scan)
 python app.py                   # runs Flask dev server on :5000 (debug=True, use_reloader=False)
 ```
 
-Load reported profit history for the Dual/Growth profit scan. The primary source is the colleague-maintained DuckDB feed (`financial_data.duckdb`, built daily by `build_db.py` from two Google Apps Script endpoints — 48 quarters and 15 years for ~5500 companies):
+Load reported profit history for the Dual/Growth profit scan. The primary path is **`profit_feed.py`**, which fetches the two Google Apps Script endpoints directly (48 quarters and 15 years for ~5500 companies) and writes `profit_history` — no `financial_data.duckdb` round-trip, and no dependency on the colleague's `fetch_classifications` module, which this app never reads:
 
 ```bash
-python import_profit_duckdb.py financial_data.duckdb            # primary path
-python import_profit_duckdb.py financial_data.duckdb --dry-run  # report, write nothing
-python import_profit_history.py <file.xlsx> --type Q            # fallback: CSV/Excel
+python profit_feed.py                        # refresh profit_history from the APIs
+python profit_feed.py --preview              # refresh, then report flag changes
+python profit_feed.py --apply                # refresh, then write the flags
+python import_profit_duckdb.py <file>.duckdb # alternative: load from a duckdb file
+python import_profit_history.py <file>.xlsx --type Q   # fallback: CSV/Excel
 ```
 
-Run the DuckDB import after each `build_db.py` refresh. Three non-obvious things it handles, all verified against the real feed — do not "simplify" them away:
+Endpoint URLs default to the current deployments and are overridable via `PROFIT_API_QUARTERLY` / `PROFIT_API_YEARLY` (Apps Script URLs change on every redeploy). `import_profit_duckdb.py` shares `profit_feed`'s reverse/trim/label transform, so the two paths cannot drift.
+
+The same refresh is on the scanner page as **Refresh Profit Data**, which then previews what it would change in `profit_tracker.ath_profit` and lets you apply or cancel. **It shares `scanner_state` with the scan, so the two can never overlap** — a scan reading `profit_history` mid-rewrite would judge some stocks on old data and some on new, silently. Three non-obvious things it handles, all verified against the real feed — do not "simplify" them away:
 - **`QL1`/`FYL1` are the NEWEST periods**, not the oldest (confirmed: `TTM == QL1+QL2+QL3+QL4` for 97.9% of full-history companies). The series is reversed on import, and the importer re-runs that check each time and warns if the feed's ordering ever flips.
 - **Oldest-end zeros are pre-listing padding**, not reported profits, and are trimmed. Left in, a rolling TTM straddling the boundary mixes real quarters with fake zeros, and for a loss-making company `0` becomes the all-time peak.
 - **`period_end` is a positional sequence** (`Q001` oldest … `Q048` newest), because the feed carries no dates and its columns shift every quarter. Each symbol's series is replaced wholesale on import. Don't mix these with date-labelled rows for the same symbol.

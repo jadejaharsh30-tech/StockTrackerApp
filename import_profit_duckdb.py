@@ -34,6 +34,7 @@ Usage:
 
 import argparse
 import os
+import sqlite3
 import sys
 
 try:
@@ -43,25 +44,14 @@ except ImportError:
 
 from init_profit_history import get_db, init_profit_history
 from profit_scanner import QUARTERS_PER_YEAR
-
-N_QUARTERS = 48
-N_YEARS = 15
+# The reverse/trim/label transform is shared with profit_feed.py (the live API
+# path) so the two importers can never drift apart.
+from profit_feed import N_QUARTERS, N_YEARS, series_to_records, trim_padding, write_profit_history
 
 # The only structural limit left: TTM is the sum of the latest four quarters,
 # so fewer than four means no TTM and therefore no verdict. There is no
 # minimum-history quality bar — a short history still has an all-time high.
 MIN_QUARTERS_FOR_VERDICT = QUARTERS_PER_YEAR
-
-
-def trim_padding(values):
-    """
-    Drop leading (oldest) zeros/None — pre-listing padding.
-    Interior zeros are preserved: a genuinely break-even quarter is real data.
-    """
-    i = 0
-    while i < len(values) and (values[i] is None or values[i] == 0):
-        i += 1
-    return values[i:]
 
 
 def build_records(db_path, active_only=False):
@@ -107,29 +97,25 @@ def build_records(db_path, active_only=False):
         symbol, values = str(row[0]).strip().upper(), list(row[1:])
         if not symbol:
             continue
-        series = trim_padding(list(reversed(values)))  # reversed -> oldest first
-        if not series:
+        rows, kept = series_to_records(symbol, values, 'Q', N_QUARTERS)
+        if not rows:
             continue
-        if len(series) < len(values):
+        if kept < len(values):
             stats['q_trimmed'] += 1
-        if len(series) < MIN_QUARTERS_FOR_VERDICT:
+        if kept < MIN_QUARTERS_FOR_VERDICT:
             stats['thin'].append(symbol)
         stats['q_symbols'] += 1
-        offset = N_QUARTERS - len(series)   # keep newest pinned at Q048
-        for i, val in enumerate(series):
-            records.append((symbol, 'Q', f"Q{offset + i + 1:03d}", float(val)))
+        records.extend(rows)
 
     for row in annual:
         symbol, values = str(row[0]).strip().upper(), list(row[1:])
         if not symbol:
             continue
-        series = trim_padding(list(reversed(values)))
-        if not series:
+        rows, _ = series_to_records(symbol, values, 'A', N_YEARS)
+        if not rows:
             continue
         stats['a_symbols'] += 1
-        offset = N_YEARS - len(series)
-        for i, val in enumerate(series):
-            records.append((symbol, 'A', f"A{offset + i + 1:03d}", float(val)))
+        records.extend(rows)
 
     return records, stats, check
 
@@ -174,36 +160,32 @@ def main():
             print("   ", r)
         return
 
-    init_profit_history(verbose=False)
+    write_profit_history(records)
+    symbols = sorted({r[0] for r in records})
+    print(f"\nImported {len(records)} rows for {len(symbols)} symbols.")
+
+    # Coverage is only reportable once profit_tracker exists — the importer can
+    # legitimately run before app.py has ever created it.
     conn = get_db()
     try:
-        # The feed is a positional snapshot whose columns shift each quarter,
-        # so replace each symbol's series wholesale rather than upserting.
-        symbols = sorted({r[0] for r in records})
-        conn.executemany("DELETE FROM profit_history WHERE symbol = ?",
-                         [(s,) for s in symbols])
-        conn.executemany(
-            '''INSERT INTO profit_history (symbol, period_type, period_end, net_profit)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(symbol, period_type, period_end)
-               DO UPDATE SET net_profit = excluded.net_profit''',
-            records)
-        conn.commit()
-
         tracked = conn.execute('''
             SELECT COUNT(DISTINCT p.symbol) FROM profit_tracker p
             WHERE EXISTS (SELECT 1 FROM profit_history h WHERE h.symbol = p.symbol)
         ''').fetchone()[0]
         total_tracked = conn.execute(
             "SELECT COUNT(DISTINCT symbol) FROM profit_tracker").fetchone()[0]
+    except sqlite3.OperationalError:
+        tracked = total_tracked = None
     finally:
         conn.close()
 
-    print(f"\nImported {len(records)} rows for {len(symbols)} symbols.")
-    print(f"Coverage of your tracked universe: {tracked}/{total_tracked} symbols.")
-    if tracked < total_tracked:
-        print("  (uncovered symbols are usually renamed/demerged tickers — "
-              "e.g. TATAMOTORS is now TMCV + TMPV in the feed)")
+    if total_tracked:
+        print(f"Coverage of your tracked universe: {tracked}/{total_tracked} symbols.")
+        if tracked < total_tracked:
+            print("  (uncovered symbols are usually renamed/demerged tickers — "
+                  "e.g. TATAMOTORS is now TMCV + TMPV in the feed)")
+    else:
+        print("  (profit_tracker not populated yet — no coverage figure to report)")
 
 
 if __name__ == '__main__':
