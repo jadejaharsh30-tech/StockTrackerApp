@@ -81,6 +81,22 @@ def init_all_tables():
     )
     ''')
 
+    # 5. ATH tracking table (master baseline for the scanner)
+    #    previous_ath = confirmed lifetime high, and doubles as the trigger price.
+    #    today_ath    = unconfirmed intraday breakout, staged until EOD promote.
+    #    Global (no user_id): baselines are a property of the stock, not the user.
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ath_tracking_table (
+        symbol TEXT PRIMARY KEY,
+        previous_ath REAL,
+        ath_date TEXT,
+        exchange TEXT,
+        last_updated REAL,
+        ignored INTEGER DEFAULT 0,
+        today_ath REAL DEFAULT NULL
+    )
+    ''')
+
     # Create indices
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_data_symbol ON stock_data(symbol)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_data_date ON stock_data(date)')
@@ -90,9 +106,9 @@ def init_all_tables():
     conn.close()
     
     print("✅ All base tables created successfully!")
-    print("   - stock_data")
-    print("   - scoring_history")
-    print("   - users")
+    for name in ('stock_data', 'fund_snapshots', 'scoring_history', 'users',
+                 'scanner_state', 'ath_tracking_table'):
+        print(f"   - {name}")
 
 if __name__ == '__main__':
     init_all_tables()

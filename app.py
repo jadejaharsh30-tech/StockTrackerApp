@@ -2966,8 +2966,8 @@ def export_sectors_csv():
         headers={'Content-Disposition': f'attachment; filename=sector_rankings_{weight_type}.csv'}
     )
 
-from ath_scanner import ATHScanner # Import Scanner Status
-from scanner_engine import run_full_scan, get_profit_tracker_tickers, get_scan_results, init_scanning_results_table, promote_ath_eod
+from scanner_engine import (run_full_scan, get_profit_tracker_tickers, get_scan_results,
+                            init_scanning_results_table, promote_ath_eod, resync_ath_baselines)
 import threading 
 
 # --- ATH SCANNER ROUTES ---
@@ -2979,23 +2979,17 @@ def ath_scanner():
 @app.route('/api/ath/run-daily', methods=['POST'])
 @login_required
 def run_daily_scan():
-    """Trigger the fast daily scan in background."""
-    current_status = status_manager.get_status(current_user.id)
-    if current_status['running']:
-        return jsonify({'status': 'warning', 'message': 'Scan already in progress.'})
-        
-    def task(user_id):
-        scanner = ATHScanner()
-        try:
-            scanner.run_daily_scan(user_id=user_id)
-        except Exception as e:
-            status_manager.set_status(user_id, False, 0, 0, f"Error: {str(e)}")
-            
-    thread = threading.Thread(target=task, args=(current_user.id,))
-    thread.daemon = True
-    thread.start()
-    
-    return jsonify({'status': 'success', 'message': 'Scan started in background.'})
+    """
+    Retired. The legacy ATHScanner wrote today's high straight into the master
+    baseline, which bypasses the EOD-promote step the current workflow depends
+    on — and it referenced an `ath_price` column that no longer exists, so it
+    raised OperationalError on every call. Use /api/run-scanner instead.
+    """
+    return jsonify({
+        'status': 'error',
+        'message': "The legacy daily scan has been retired — use 'Run ATH Scan' instead. "
+                   "It promoted intraday highs immediately, bypassing EOD Sync."
+    }), 410
 
 @app.route('/api/ath/status', methods=['GET'])
 @login_required
@@ -3006,20 +3000,37 @@ def get_scan_status():
 @app.route('/api/ath/run-refresh', methods=['POST'])
 @login_required
 def run_weekend_refresh():
-    """Trigger the deep clean."""
-    if SCAN_STATUS['running']:
+    """
+    Re-validate ATH baselines from full history.
+
+    A normal scan only seeds symbols it has never seen, so a baseline that was
+    wrong when first seeded stays wrong. This recomputes it, excluding today's
+    candle so EOD-promote semantics are preserved.
+
+    Body: {"only_broken": true} limits it to missing/zero baselines (fast).
+    """
+    current_status = status_manager.get_status(current_user.id)
+    if current_status['running']:
         return jsonify({'status': 'warning', 'message': 'Scan/Refresh already in progress.'})
-        
-    scanner = ATHScanner()
-    
+
+    payload = request.get_json(silent=True) or {}
+    only_broken = bool(payload.get('only_broken', False))
+    tickers = get_profit_tracker_tickers(current_user.id)
+
+    if not only_broken and not tickers:
+        return jsonify({'status': 'error', 'message': 'No tickers found in profit tracker.'})
+
     def task(user_id):
         try:
-            scanner.run_weekend_refresh(user_id=user_id)
-        except: pass
-            
+            resync_ath_baselines(tickers, user_id=user_id, only_broken=only_broken)
+        except Exception as e:
+            status_manager.set_status(user_id, False, 0, 0, f"Refresh error: {str(e)}")
+
     thread = threading.Thread(target=task, args=(current_user.id,))
+    thread.daemon = True
     thread.start()
-    return jsonify({'status': 'success', 'message': 'Deep refresh started. Check terminal for progress.'})
+    scope = 'missing/zero baselines' if only_broken else f'{len(tickers)} tickers'
+    return jsonify({'status': 'success', 'message': f'Baseline refresh started for {scope}.'})
 
 @app.route('/api/ath/todays-results', methods=['GET'])
 @login_required
@@ -3031,20 +3042,24 @@ def get_ath_todays_results():
     
     # Query MASTER table for any stock where ath_date = today
     # This prevents manual edits with old dates from showing up.
+    # Column is `previous_ath` (there is no `ath_price` — referencing it made
+    # this endpoint raise OperationalError on every call). Rows staged by today's
+    # scan carry today_ath; rows already promoted carry ath_date = today.
     rows = conn.execute('''
-        SELECT symbol, ath_price, ath_date 
-        FROM ath_tracking_table 
-        WHERE ath_date = ? AND ignored = 0
+        SELECT symbol, previous_ath, today_ath, ath_date
+        FROM ath_tracking_table
+        WHERE (today_ath IS NOT NULL OR ath_date = ?) AND ignored = 0
     ''', (today_str,)).fetchall()
-    
+
     results = []
     for r in rows:
+        promoted = r['today_ath'] is None
         results.append({
             'symbol': r['symbol'],
-            'new_ath': r['ath_price'],
-            'prev_ath': 0.0, # Not strictly tracked in history in V2, simplified
-            'date': r['ath_date'],
-            'outperformance': 0.0 # simplified
+            'new_ath': r['previous_ath'] if promoted else r['today_ath'],
+            'prev_ath': r['previous_ath'],
+            'date': r['ath_date'] or today_str,
+            'promoted': promoted,
         })
     conn.close()
     return jsonify(results)
@@ -3297,9 +3312,23 @@ def run_new_scanner():
     # Ensure staging table exists with new schema
     init_scanning_results_table()
 
+    # Optional slack (%) below the profit peak when judging "at ATH"
+    payload = request.get_json(silent=True) or {}
+    try:
+        tolerance = float(payload.get('profit_tolerance', 0) or 0)
+    except (TypeError, ValueError):
+        tolerance = 0.0
+
+    # Required profit criterion, chosen before the scan. Only two are
+    # meaningful: Dual, or Growth (which subsumes Dual). Defaults to Dual.
+    criterion = str(payload.get('profit_criterion', 'D')).upper()[:1]
+    if criterion not in ('D', 'G'):
+        criterion = 'D'
+
     def task(user_id):
         try:
-            run_full_scan(tickers, user_id=user_id)
+            run_full_scan(tickers, user_id=user_id, profit_tolerance_pct=tolerance,
+                          profit_criterion=criterion)
         except Exception as e:
             status_manager.set_status(user_id, False, 0, 0, f"Scan error: {str(e)}")
 
@@ -3338,6 +3367,158 @@ def get_scanner_results():
     """Fetch current scan results from staging table."""
     results = get_scan_results()
     return jsonify(results)
+
+@app.route('/api/scanner/reset', methods=['POST'])
+@login_required
+def reset_scanner_state():
+    """
+    Clear a stuck 'running' flag. If a worker dies mid-scan the flag is never
+    cleared and every later scan is refused; get_status auto-expires it after
+    30 minutes, this is the manual escape hatch.
+    """
+    status_manager.reset(current_user.id)
+    return jsonify({'status': 'success', 'message': 'Scanner state reset. You can run a scan now.'})
+
+@app.route('/api/profit/refresh', methods=['POST'])
+@login_required
+def refresh_profit_data():
+    """
+    Pull fresh profit history from the two Apps Script endpoints into
+    profit_history, in a background thread.
+
+    Shares scanner_state with the ATH scan, so the two can never overlap: a scan
+    reading profit_history mid-rewrite would judge some stocks on old data and
+    some on new, silently. This route refuses to start while a scan is running,
+    and /api/run-scanner refuses while this is running.
+    """
+    current_status = status_manager.get_status(current_user.id)
+    if current_status['running']:
+        return jsonify({'status': 'warning',
+                        'message': 'A scan or refresh is already in progress.'})
+
+    def task(user_id):
+        from profit_feed import refresh
+        try:
+            status_manager.set_status(user_id, True, 0, 100,
+                                      "Starting profit data refresh...", force=True)
+            summary = refresh(progress_callback=lambda pct, msg:
+                              status_manager.set_status(user_id, True, pct, 100, msg))
+            msg = (f"Profit data refreshed: {summary['symbols']} symbols, "
+                   f"{summary['rows']} rows.")
+            if not summary['ordering_ok']:
+                msg += (" WARNING: TTM no longer matches QL1+QL2+QL3+QL4 — "
+                        "verify the sheet's column order before trusting verdicts.")
+            status_manager.set_status(user_id, False, 100, 100, msg, force=True)
+        except Exception as e:
+            status_manager.set_status(user_id, False, 0, 100,
+                                      f"Profit refresh failed: {e}", force=True)
+
+    thread = threading.Thread(target=task, args=(current_user.id,))
+    thread.daemon = True
+    thread.start()
+    return jsonify({'status': 'success', 'message': 'Profit data refresh started.'})
+
+
+@app.route('/api/profit/preview-flags', methods=['GET'])
+@login_required
+def preview_profit_flags():
+    """
+    What applying the computed Dual verdicts would change in
+    profit_tracker.ath_profit. Reads only — writes nothing.
+    """
+    from profit_feed import preview_flag_changes
+    try:
+        return jsonify({'success': True, **preview_flag_changes(current_user.id)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/profit/apply-all-flags', methods=['POST'])
+@login_required
+def apply_all_profit_flags():
+    """
+    Write the computed Dual verdict into profit_tracker.ath_profit for every
+    tracked symbol whose flag differs. Symbols with no usable profit history are
+    never written — the feed has no opinion on them, so overwriting would invent
+    one, and several are renamed tickers the feed cannot cover at all.
+    """
+    from profit_feed import apply_flag_changes
+    data = request.get_json(silent=True) or {}
+    symbols = data.get('symbols')          # None = apply every change
+    try:
+        result = apply_flag_changes(current_user.id, symbols=symbols)
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/profit/coverage', methods=['GET'])
+@login_required
+def profit_coverage():
+    """How many symbols have usable profit history loaded (for UI warnings)."""
+    from profit_scanner import get_coverage
+    return jsonify(get_coverage())
+
+@app.route('/api/profit/apply-flag', methods=['POST'])
+@login_required
+def apply_profit_flag():
+    """
+    Apply a scan-computed profit verdict to the user's manual
+    profit_tracker.ath_profit flag. Explicit, per-user action — the scan itself
+    never writes this column.
+
+    The flag tracks DUAL only — quarterly AND TTM both at an all-time high.
+    Growth (TTM at ATH with the quarter merely beating its year-ago comparator)
+    does NOT set it, because ath_profit gates the FUND category and that is
+    reserved for the strict condition. This is independent of whichever
+    criterion was chosen for the scan: selecting Growth widens what the scan
+    reports, not what qualifies as profit-at-ATH for portfolio classification.
+
+    Body: {"symbols": ["SBIN", ...]} — 'D' -> 'Y', anything else -> 'N'.
+    Symbols with an N/A verdict (no usable profit history) are skipped.
+    """
+    data = request.get_json(silent=True) or {}
+    symbols = [str(s).upper() for s in data.get('symbols', []) if s]
+    if not symbols:
+        return jsonify({'success': False, 'error': 'No symbols provided.'})
+
+    conn = get_db()
+    updated, skipped, missing = [], [], []
+    try:
+        placeholders = ','.join(['?'] * len(symbols))
+        rows = conn.execute(
+            f"SELECT symbol, profit_flag FROM ath_scanning_results WHERE symbol IN ({placeholders})",
+            symbols
+        ).fetchall()
+        verdicts = {r['symbol']: r['profit_flag'] for r in rows}
+
+        for symbol in symbols:
+            flag = verdicts.get(symbol)
+            if flag in (None, 'N/A'):
+                skipped.append(symbol)
+                continue
+            new_value = 'Y' if flag == 'D' else 'N'
+            cur = conn.execute(
+                'UPDATE profit_tracker SET ath_profit = ? WHERE symbol = ? AND user_id = ?',
+                (new_value, symbol, current_user.id)
+            )
+            if cur.rowcount:
+                updated.append({'symbol': symbol, 'ath_profit': new_value})
+            else:
+                missing.append(symbol)
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return jsonify({'success': False, 'error': str(e)})
+    conn.close()
+
+    return jsonify({
+        'success': True,
+        'updated': updated,
+        'updated_count': len(updated),
+        'skipped': skipped,
+        'not_in_profit_tracker': missing
+    })
 
 @app.route('/api/dashboard/stock-count', methods=['GET'])
 @login_required

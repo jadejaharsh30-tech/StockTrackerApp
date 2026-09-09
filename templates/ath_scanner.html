@@ -358,30 +358,54 @@
     </div>
 
     <div class="scanner-controls" style="margin-bottom: 12px; padding: 10px 12px; gap: 12px;">
+        <div style="display: flex; gap: 6px; align-items: center;" title="Slack allowed below the profit peak when judging &quot;at ATH&quot;. 0 = must equal or exceed the all-time peak.">
+            <label for="profitTolerance" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600;">Tolerance:</label>
+            <input type="number" id="profitTolerance" value="0.0" step="0.1" min="0" max="100"
+                style="width: 62px; padding: 4px 6px; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); color: var(--text-color);">
+            <span style="font-size: 0.8rem; color: var(--text-muted);">%</span>
+        </div>
+
+        <div style="display: flex; gap: 6px; align-items: center;" title="The profit condition a stock must meet to be marked 'At ATH' in this scan. Dual = latest quarter AND TTM both at an all-time high. Growth = TTM at ATH with the latest quarter beating its year-ago comparator; Growth includes every Dual stock. Chosen before the scan.">
+            <label for="reqProfit" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600; line-height: 1.1;">Req.<br>Profit:</label>
+            <select id="reqProfit"
+                style="padding: 4px 6px; font-size: 0.85rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--card-bg); color: var(--text-color);">
+                <option value="D" selected>Dual</option>
+                <option value="G">Growth (incl. Dual)</option>
+            </select>
+        </div>
+
+        <button class="scanner-btn btn-refresh" id="btnRefreshProfit" onclick="refreshProfitData()"
+            style="padding: 8px 14px;"
+            title="Pull fresh quarterly and yearly profit data from the two Google Sheets APIs, then show what it would change in Profit Manager before writing anything. Run this before a scan; it cannot run while a scan is in progress.">
+            <span class="spinner" id="spinRefreshProfit"
+                style="border-top-color: var(--text-color); width: 14px; height: 14px;"></span>
+            Refresh Profit Data 🔄
+        </button>
+
         <button class="scanner-btn btn-run-daily" id="btnNewScan" onclick="runNewScanner()" style="padding: 8px 16px;">
             <span class="spinner" id="spinNewScan"></span>
             Run ATH Scan ⚡
         </button>
 
         <div style="display: flex; gap: 8px; align-items: center;">
-            <button class="scanner-btn btn-refresh" id="btnOldDailyScan" onclick="runDailyScan()"
-                style="padding: 6px 12px; font-size: 0.85rem;">
-                <span class="spinner" id="spinDaily"
-                    style="border-top-color: var(--text-color); width: 14px; height: 14px;"></span>
-                Legacy Daily 🔄
-            </button>
-
             <button class="scanner-btn btn-refresh" id="btnRefresh" onclick="runRefresh()"
-                style="padding: 6px 12px; font-size: 0.85rem;">
+                style="padding: 6px 12px; font-size: 0.85rem;"
+                title="Recompute ATH baselines from full history. A normal scan only seeds symbols it has never seen, so a baseline that was wrong when first seeded stays wrong. Does not promote today's high.">
                 <span class="spinner" id="spinRefresh"
                     style="border-top-color: var(--text-color); width: 14px; height: 14px;"></span>
-                Refresh 🧹
+                Refresh Baselines 🧹
             </button>
 
             <button class="scanner-btn btn-refresh" id="btnEodSync" onclick="runEodSync()"
                 style="padding: 6px 12px; font-size: 0.85rem; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border: none;">
                 <span class="spinner" id="spinEod" style="border-top-color: #fff; width: 14px; height: 14px;"></span>
                 EOD Sync 🌅
+            </button>
+
+            <button class="scanner-btn btn-refresh" id="btnResetScanner" onclick="resetScanner()"
+                style="padding: 6px 12px; font-size: 0.85rem;"
+                title="Clear a stuck 'scan already in progress' state. Use this if a scan crashed or the server restarted mid-scan. Does not touch any of your data.">
+                Reset Scanner ♻️
             </button>
         </div>
 
@@ -396,6 +420,11 @@
             <span style="font-weight: 600; font-size: 0.95rem;">New ATH Hits Today</span>
             <div style="display: flex; gap: 12px; align-items: center;">
                 <span class="results-count" id="selectedCount" style="font-size: 0.8rem;"></span>
+                <button class="scanner-btn btn-refresh" id="btnApplyProfit" onclick="applyProfitFlags()"
+                    style="display: none; padding: 6px 12px; font-size: 0.85rem;"
+                    title="Overwrite the manual ATH Profit flag in Profit Manager with the computed verdict for the selected stocks">
+                    📌 Apply Profit Flag
+                </button>
                 <button class="btn-bulk-add" id="btnBulkAdd" onclick="bulkAddSelected()"
                     style="display: none; padding: 6px 16px; font-size: 0.85rem;">
                     ➕ Add Selected
@@ -460,12 +489,29 @@
         document.getElementById('progressBar').style.background = 'linear-gradient(90deg, #10b981, #059669)';
 
         try {
+            const tolEl = document.getElementById('profitTolerance');
             const response = await fetch('/api/run-scanner', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
+                body: JSON.stringify({
+                    profit_tolerance: tolEl ? parseFloat(tolEl.value) || 0 : 0,
+                    profit_criterion: (document.getElementById('reqProfit') || {}).value || 'D'
+                })
             });
             const data = await response.json();
+
+            // A worker killed mid-scan leaves is_running set; offer the reset
+            // rather than leaving the user permanently locked out.
+            if (data.status === 'warning' && /in progress/i.test(data.message || '')) {
+                if (confirm(data.message + "\n\nIf no scan is actually running (e.g. the last one "
+                          + "crashed), click OK to reset the scanner state and try again.")) {
+                    await fetch('/api/scanner/reset', { method: 'POST' });
+                    status.innerText = "Scanner state reset — click Run ATH Scan again.";
+                }
+                btn.disabled = false;
+                spinner.style.display = 'none';
+                return;
+            }
 
             if (data.status === 'success') {
                 scannerPollInterval = setInterval(pollScannerStatus, 1500);
@@ -562,16 +608,144 @@
         } catch (e) { /* pass */ }
     }
 
+    // Full unfiltered result set from the last scan; the Req. Profit dropdown
+    // filters this view-side without re-scanning.
+    let lastScanResults = [];
+
+    // RS is measured over whatever aligned history a stock has, up to 211
+    // sessions. A recent listing gets a shorter window rather than no verdict,
+    // so mark it so a short reading isn't mistaken for a full one.
+    const RS_FULL_WINDOW = 211;
+
+    function rsTitle(row) {
+        const w = row.rs_window;
+        if (!w) return 'Not enough aligned history against Nifty 500 to measure relative strength.';
+        return w < RS_FULL_WINDOW
+            ? `Measured over ${w} sessions (short listing history — full window is ${RS_FULL_WINDOW}).`
+            : `Measured over the full ${w}-session window.`;
+    }
+
+    function rsCell(value, row) {
+        if (value === null || value === undefined) return '-';
+        const short = row.rs_window && row.rs_window < RS_FULL_WINDOW;
+        return short ? `${value}<span style="opacity:.55;">*</span>` : `${value}`;
+    }
+
+    function badgeClass(v) {
+        if (v === 'Y') return 'badge-y';
+        if (v === 'N') return 'badge-n';
+        return 'badge-na';
+    }
+
+    // Single Profit column: does the stock meet the Req. Profit condition chosen
+    // for this scan? The component legs live in the tooltip so a verdict stays
+    // auditable without four extra columns.
+    function profitBadge(row) {
+        const fmt = n => (n === null || n === undefined) ? '?' : Number(n).toLocaleString(undefined, {maximumFractionDigits: 0});
+        const crit = row.profit_criterion === 'G' ? 'Growth' : 'Dual';
+        const meets = row.profit_meets || 'N/A';
+
+        // Only two states are shown. Where the condition could not be evaluated
+        // the stock has not demonstrated profit at an all-time high, so it reads
+        // "Not at ATH" — the reason stays in the tooltip so a data gap is still
+        // discoverable rather than silently indistinguishable from a real fail.
+        if (meets === 'N/A' || !row.profit_basis) {
+            const why = row.profit_reason || 'no usable profit history for this symbol';
+            return `<span class="badge-n" title="Not evaluated: ${why}. Shown as Not at ATH because the condition is unproven.">Not at ATH</span>`;
+        }
+
+        const legs = [
+            `TTM at ATH: ${row.profit_ttm_ath}`,
+            `Quarter at ATH: ${row.profit_qtr_ath}`,
+            `Quarter vs year-ago: ${row.profit_yoy}`,
+            `TTM ${fmt(row.profit_ttm)} vs peak of ${row.profit_points} reported FYs (${fmt(row.profit_peak_fy)})`
+        ].join(' | ');
+        const detail = `Required: ${crit}. ${legs}`;
+
+        return meets === 'Y'
+            ? `<span class="badge-y" title="${detail}">At ATH</span>`
+            : `<span class="badge-n" title="${detail}">Not at ATH</span>`;
+    }
+
+    // The manual ath_profit flag tracks DUAL only — it gates the FUND category,
+    // which is reserved for the strict condition. Growth never sets it, even when
+    // Growth was the scan's Req. Profit.
+    function manualCell(row) {
+        const manual = row.manual_ath_profit;
+        const computed = row.profit_flag === 'D' ? 'Y'
+                       : ((row.profit_flag === 'N' || row.profit_flag === 'G') ? 'N' : null);
+        if (manual === null || manual === undefined) return '<span title="Not in your Profit Manager">–</span>';
+        if (computed === null) {
+            const why = row.profit_reason || 'no usable profit history';
+            return `<span title="Not evaluated (${why}) — Apply Profit Flag leaves this unchanged">${manual}</span>`;
+        }
+        if (manual === computed) return `${manual} <span title="Matches the Dual test">✓</span>`;
+        const why = row.profit_flag === 'G'
+            ? 'computed Growth, not Dual — the flag tracks Dual only'
+            : `computed ${computed} on the Dual test`;
+        return `<b style="color: var(--warning-color);" title="Your manual flag is ${manual}; ${why}">${manual} → ${computed}</b>`;
+    }
+
+    // ====================== APPLY COMPUTED PROFIT FLAG ======================
+    async function applyProfitFlags() {
+        const checked = document.querySelectorAll('.row-check:checked');
+        if (checked.length === 0) {
+            alert('Select the stocks whose computed profit verdict you want to apply.');
+            return;
+        }
+        const symbols = Array.from(checked).map(b => b.dataset.symbol);
+        if (!confirm(
+            `Overwrite the manual "ATH Profit" flag in Profit Manager for ${symbols.length} stock(s)?\n\n` +
+            `The flag is set from the strict DUAL test (quarter AND TTM both at ATH) — ` +
+            `Growth-only stocks are set to N, even if this scan required Growth.\n\n` +
+            `This changes your dashboard's FUND/PROP category and GO/WAIT output for these stocks.`)) return;
+
+        const status = document.getElementById('statusText');
+        status.innerText = 'Applying profit flags...';
+        try {
+            const res = await fetch('/api/profit/apply-flag', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ symbols })
+            });
+            const data = await res.json();
+            if (!data.success) { status.innerText = '⚠️ ' + (data.error || 'Failed'); return; }
+
+            let msg = `✅ Updated ${data.updated_count} stock(s).`;
+            if (data.skipped && data.skipped.length) msg += ` Skipped ${data.skipped.length} with no verdict.`;
+            if (data.not_in_profit_tracker && data.not_in_profit_tracker.length) {
+                msg += ` ${data.not_in_profit_tracker.length} not in Profit Manager.`;
+            }
+            status.innerText = msg;
+
+            // Reflect the new manual values in the table without a re-scan
+            (data.updated || []).forEach(u => {
+                const row = lastScanResults.find(r => r.symbol === u.symbol);
+                if (row) row.manual_ath_profit = u.ath_profit;
+            });
+            renderScannerResults();
+        } catch (e) {
+            status.innerText = 'Network error applying profit flags.';
+        }
+    }
+
     function renderScannerResults(results) {
         const area = document.getElementById('resultsArea');
+
+        // Called with data after a scan; called bare when the filter changes.
+        if (results) lastScanResults = results;
+        const allResults = lastScanResults || [];
+
         area.innerHTML = '';
         area.style.display = 'block';
 
-        if (!results || results.length === 0) {
+        if (allResults.length === 0) {
             area.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No new ATH hits found.</div>';
             document.getElementById('btnBulkAdd').style.display = 'none';
             return;
         }
+
+        const results_ = allResults;
 
         const wrapper = document.createElement('div');
         wrapper.style.maxHeight = '850px';
@@ -592,6 +766,8 @@
                     <th>Close > ATH</th>
                     <th>Curr RS</th>
                     <th>ATH RS</th>
+                    <th id="thProfit" title="Whether the stock meets the Req. Profit condition selected for this scan.">Profit</th>
+                    <th title="Your current manual ath_profit flag in Profit Manager. Driven by the strict Dual test regardless of the scan criterion.">Manual</th>
                     <th style="width: 120px;">Stop Loss</th>
                 </tr>
             </thead>
@@ -599,7 +775,7 @@
         `;
 
         const tbody = table.querySelector('tbody');
-        results.forEach(row => {
+        results_.forEach(row => {
             const tr = document.createElement('tr');
             tr.dataset.symbol = row.symbol;
             tr.innerHTML = `
@@ -610,8 +786,10 @@
                 <td><span class="${row.ath_outperformance === 'Y' ? 'badge-y' : (row.ath_outperformance === 'N' ? 'badge-n' : 'badge-na')}">${row.ath_outperformance}</span></td>
                 <td><span class="${row.green_candle === 'Y' ? 'badge-y' : 'badge-n'}">${row.green_candle}</span></td>
                 <td><span class="${row.close_gt_ath === 'Y' ? 'badge-y' : 'badge-n'}">${row.close_gt_ath}</span></td>
-                <td style="color: var(--text-muted); font-size: 0.9rem;">${row.current_rs !== null ? row.current_rs : '-'}</td>
-                <td style="color: var(--text-muted); font-size: 0.9rem;">${row.ath_rs !== null ? row.ath_rs : '-'}</td>
+                <td style="color: var(--text-muted); font-size: 0.9rem;" title="${rsTitle(row)}">${rsCell(row.current_rs, row)}</td>
+                <td style="color: var(--text-muted); font-size: 0.9rem;" title="${rsTitle(row)}">${rsCell(row.ath_rs, row)}</td>
+                <td>${profitBadge(row)}</td>
+                <td style="font-size: 0.85rem; color: var(--text-muted);">${manualCell(row)}</td>
                 <td><input type="number" class="inline-input" step="0.05" placeholder="SL" data-field="stop_loss"></td>
             `;
             tbody.appendChild(tr);
@@ -620,8 +798,9 @@
         wrapper.appendChild(table);
         area.appendChild(wrapper);
 
-        // Show bulk-add button
+        // Show bulk-add + apply-profit buttons
         document.getElementById('btnBulkAdd').style.display = 'flex';
+        document.getElementById('btnApplyProfit').style.display = 'flex';
         updateSelectedCount();
     }
 
@@ -742,28 +921,6 @@
     // ====================== LEGACY SCANNER (Existing) ======================
     let pollInterval = null;
 
-    async function runDailyScan() {
-        const btn = document.getElementById('btnOldDailyScan');
-        const status = document.getElementById('statusText');
-        btn.disabled = true;
-        status.innerText = "Initiating legacy scan...";
-        document.getElementById('progressContainer').style.display = 'block';
-
-        try {
-            const response = await fetch('/api/ath/run-daily', { method: 'POST' });
-            const data = await response.json();
-            if (data.status === 'success') {
-                pollInterval = setInterval(pollStatus, 1000);
-            } else {
-                status.innerText = "Error: " + data.message;
-                btn.disabled = false;
-            }
-        } catch (e) {
-            status.innerText = "Network Error";
-            btn.disabled = false;
-        }
-    }
-
     async function pollStatus() {
         try {
             const res = await fetch('/api/ath/status');
@@ -778,8 +935,11 @@
 
             if (!status.running) {
                 clearInterval(pollInterval);
-                document.getElementById('btnOldDailyScan').disabled = false;
-                document.getElementById('statusText').innerText = "Legacy Scan Complete ✅";
+                const rBtn = document.getElementById('btnRefresh');
+                if (rBtn) rBtn.disabled = false;
+                const rSpin = document.getElementById('spinRefresh');
+                if (rSpin) rSpin.style.display = 'none';
+                document.getElementById('statusText').innerText = status.message || "Complete ✅";
                 document.getElementById('progressBar').style.background = 'var(--primary-color)';
 
                 if (status.results && status.results.length > 0) {
@@ -817,16 +977,174 @@
         area.innerHTML = html;
     }
 
+    // ====================== REFRESH PROFIT DATA ======================
+    // Refresh profit_history from the two APIs, then show what that would change
+    // in Profit Manager and let the user apply or cancel. Cancelling leaves the
+    // refreshed data in place and the flags untouched.
+    let profitPollInterval = null;
+
+    async function refreshProfitData() {
+        const btn = document.getElementById('btnRefreshProfit');
+        const spin = document.getElementById('spinRefreshProfit');
+        const status = document.getElementById('statusText');
+
+        btn.disabled = true;
+        spin.style.display = 'inline-block';
+        status.innerText = "Starting profit data refresh...";
+        document.getElementById('progressContainer').style.display = 'block';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressBar').style.background = 'linear-gradient(90deg, #6366f1, #4f46e5)';
+
+        try {
+            const res = await fetch('/api/profit/refresh', { method: 'POST' });
+            const data = await res.json();
+            if (data.status !== 'success') {
+                status.innerText = "⚠️ " + data.message;
+                btn.disabled = false; spin.style.display = 'none';
+                return;
+            }
+            profitPollInterval = setInterval(pollProfitRefresh, 1500);
+        } catch (e) {
+            status.innerText = "Network error starting refresh.";
+            btn.disabled = false; spin.style.display = 'none';
+        }
+    }
+
+    async function pollProfitRefresh() {
+        try {
+            const res = await fetch('/api/scanner/status');
+            const s = await res.json();
+            document.getElementById('progressLabel').innerText = s.message || "Refreshing...";
+            const pct = s.total > 0 ? Math.round((s.progress / s.total) * 100) : 0;
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressPercent').innerText = pct + '%';
+
+            if (!s.running) {
+                clearInterval(profitPollInterval);
+                document.getElementById('btnRefreshProfit').disabled = false;
+                document.getElementById('spinRefreshProfit').style.display = 'none';
+                document.getElementById('statusText').innerText = s.message || "Refresh complete";
+
+                if ((s.message || '').toLowerCase().includes('failed')) return;
+                await showProfitFlagPreview();
+            }
+        } catch (e) { /* keep polling */ }
+    }
+
+    // Step 2: show the blast radius and let the user decide.
+    async function showProfitFlagPreview() {
+        const status = document.getElementById('statusText');
+        let pv;
+        try {
+            const res = await fetch('/api/profit/preview-flags');
+            pv = await res.json();
+        } catch (e) {
+            status.innerText = "Refresh done, but the flag preview failed to load.";
+            return;
+        }
+        if (!pv.success) {
+            status.innerText = "Refresh done. Preview error: " + (pv.error || 'unknown');
+            return;
+        }
+
+        if (!pv.changes || pv.changes.length === 0) {
+            status.innerText = `✅ Profit data refreshed. No ATH Profit flags need changing `
+                             + `(${pv.unchanged} already agree, ${pv.no_data_count} have no feed data).`;
+            return;
+        }
+
+        const sample = pv.changes.slice(0, 12)
+            .map(c => `   ${c.symbol}: ${c.from} → ${c.to}`).join('\n');
+        const more = pv.changes.length > 12 ? `\n   ...and ${pv.changes.length - 12} more` : '';
+
+        const ok = confirm(
+            `Profit data refreshed.\n\n` +
+            `${pv.changes.length} of your ${pv.total} tracked symbols would change their ` +
+            `"ATH Profit" flag:\n` +
+            `   ${pv.to_y} will become Y  (promoted into FUND)\n` +
+            `   ${pv.to_n} will become N  (demoted out of FUND)\n` +
+            `   ${pv.unchanged} already agree\n` +
+            `   ${pv.no_data_count} have no feed data and will NOT be touched\n\n` +
+            `${sample}${more}\n\n` +
+            `This changes your dashboard's FUND/PROP category and GO/WAIT output.\n\n` +
+            `OK = write these flags.   Cancel = write nothing (refreshed data is kept).`);
+
+        if (!ok) {
+            status.innerText = `Profit data refreshed. ${pv.changes.length} flag change(s) NOT applied.`;
+            return;
+        }
+
+        status.innerText = "Applying flag changes...";
+        try {
+            const res = await fetch('/api/profit/apply-all-flags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})           // no symbols = apply them all
+            });
+            const r = await res.json();
+            status.innerText = r.success
+                ? `✅ ${r.updated} flag(s) updated (${r.to_y} → Y, ${r.to_n} → N). `
+                  + `${r.skipped_no_data} skipped (no feed data).`
+                : "⚠️ " + (r.error || 'Apply failed');
+        } catch (e) {
+            status.innerText = "Network error applying flags.";
+        }
+    }
+
+    // Clear a stuck "scan already in progress" flag. Touches only scanner_state.
+    async function resetScanner() {
+        if (!confirm("Reset the scanner's running state?\n\n" +
+                     "Use this only if a scan crashed or the server restarted while one was " +
+                     "running, and the scanner now refuses to start.\n\n" +
+                     "This does NOT touch your ATH baselines, scan results, or any other data.")) return;
+        const status = document.getElementById('statusText');
+        status.innerText = "Resetting scanner state...";
+        try {
+            const res = await fetch('/api/scanner/reset', { method: 'POST' });
+            const data = await res.json();
+            status.innerText = data.status === 'success'
+                ? "✅ " + data.message
+                : "⚠️ " + (data.message || 'Reset failed');
+            // Re-enable anything a dead scan left disabled
+            ['btnNewScan', 'btnRefresh', 'btnEodSync'].forEach(id => {
+                const b = document.getElementById(id); if (b) b.disabled = false;
+            });
+            ['spinNewScan', 'spinRefresh', 'spinEod'].forEach(id => {
+                const s = document.getElementById(id); if (s) s.style.display = 'none';
+            });
+            if (typeof scannerPollInterval !== 'undefined') clearInterval(scannerPollInterval);
+            if (typeof pollInterval !== 'undefined') clearInterval(pollInterval);
+        } catch (e) {
+            status.innerText = "Network error during reset.";
+        }
+    }
+
     async function runRefresh() {
-        if (!confirm("This will re-download full history for ALL tracked stocks. It may take several minutes. Continue?")) return;
+        // Full re-validation of every tracked symbol's lifetime high. This is the
+        // one that matters after a gap — it does NOT promote today's high, so the
+        // EOD Sync step keeps its meaning.
+        if (!confirm(
+            "Refresh ATH baselines for ALL tracked symbols?\n\n" +
+            "Re-downloads full price history and recomputes each stock's lifetime high, " +
+            "EXCLUDING today's candle. Run this after a long gap, or your trigger prices " +
+            "will be stale.\n\n" +
+            "Takes several minutes. It does not promote today's high — only EOD Sync does that.")) return;
+
+        const onlyBroken = false;
         const btn = document.getElementById('btnRefresh');
         const status = document.getElementById('statusText');
         btn.disabled = true;
-        status.innerText = "Initiating deep refresh...";
+        const spin = document.getElementById('spinRefresh');
+        if (spin) spin.style.display = 'inline-block';
+        status.innerText = onlyBroken ? "Repairing broken baselines..." : "Refreshing all baselines...";
         document.getElementById('progressContainer').style.display = 'block';
 
         try {
-            const response = await fetch('/api/ath/run-refresh', { method: 'POST' });
+            const response = await fetch('/api/ath/run-refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ only_broken: onlyBroken })
+            });
             const data = await response.json();
             if (data.status === 'success') {
                 pollInterval = setInterval(pollStatus, 1000);
