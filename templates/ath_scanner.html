@@ -612,6 +612,25 @@
     // filters this view-side without re-scanning.
     let lastScanResults = [];
 
+    // RS is measured over whatever aligned history a stock has, up to 211
+    // sessions. A recent listing gets a shorter window rather than no verdict,
+    // so mark it so a short reading isn't mistaken for a full one.
+    const RS_FULL_WINDOW = 211;
+
+    function rsTitle(row) {
+        const w = row.rs_window;
+        if (!w) return 'Not enough aligned history against Nifty 500 to measure relative strength.';
+        return w < RS_FULL_WINDOW
+            ? `Measured over ${w} sessions (short listing history — full window is ${RS_FULL_WINDOW}).`
+            : `Measured over the full ${w}-session window.`;
+    }
+
+    function rsCell(value, row) {
+        if (value === null || value === undefined) return '-';
+        const short = row.rs_window && row.rs_window < RS_FULL_WINDOW;
+        return short ? `${value}<span style="opacity:.55;">*</span>` : `${value}`;
+    }
+
     function badgeClass(v) {
         if (v === 'Y') return 'badge-y';
         if (v === 'N') return 'badge-n';
@@ -767,8 +786,8 @@
                 <td><span class="${row.ath_outperformance === 'Y' ? 'badge-y' : (row.ath_outperformance === 'N' ? 'badge-n' : 'badge-na')}">${row.ath_outperformance}</span></td>
                 <td><span class="${row.green_candle === 'Y' ? 'badge-y' : 'badge-n'}">${row.green_candle}</span></td>
                 <td><span class="${row.close_gt_ath === 'Y' ? 'badge-y' : 'badge-n'}">${row.close_gt_ath}</span></td>
-                <td style="color: var(--text-muted); font-size: 0.9rem;">${row.current_rs !== null ? row.current_rs : '-'}</td>
-                <td style="color: var(--text-muted); font-size: 0.9rem;">${row.ath_rs !== null ? row.ath_rs : '-'}</td>
+                <td style="color: var(--text-muted); font-size: 0.9rem;" title="${rsTitle(row)}">${rsCell(row.current_rs, row)}</td>
+                <td style="color: var(--text-muted); font-size: 0.9rem;" title="${rsTitle(row)}">${rsCell(row.ath_rs, row)}</td>
                 <td>${profitBadge(row)}</td>
                 <td style="font-size: 0.85rem; color: var(--text-muted);">${manualCell(row)}</td>
                 <td><input type="number" class="inline-input" step="0.05" placeholder="SL" data-field="stop_loss"></td>

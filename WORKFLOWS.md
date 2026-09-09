@@ -488,3 +488,44 @@ them out of FUND.
 
 Applied flags follow the **Dual** test only, independent of the scan's Req.
 Profit setting — see §7.10.
+
+### 7.13 Two RS corrections: split adjustment and short histories
+
+**Splits were producing false `N` on ATH O.P.** The index series is fetched with
+`auto_adjust=True`, but the stock's RS history was fetched with
+`auto_adjust=False`. Raw prices are not back-adjusted for splits, so a 1:4 split
+puts a 4x cliff in the stock series while the index stays continuous. The
+fixed-anchor line anchors at the window *start* — pre-split — so every session
+after the split reads as a collapse to ~1/4 of the peak.
+
+Observed on INDIAGLYCO: `current_rs 32.52` against `ath_rs 127.47`, a ratio of
+**3.92**. Reproduced with a simulated 1:4 split:
+
+| stock history | OP | curr | ath | ath/curr |
+|---|---|---|---|---|
+| unadjusted (old) | **N** | 34.97 | 127.29 | 3.64 |
+| adjusted (new) | **Y** | 139.88 | 139.88 | 1.00 |
+
+The verdict flips from `N` to `Y` — so this was not cosmetic. ATH O.P. is the
+hard gate in `get_investment_category`, meaning split-affected stocks were being
+silently excluded from FUND/PROP entirely.
+
+Only the **RS history** fetches changed to `auto_adjust=True`. ATH *price*
+detection (Phase 1 sync, Phase 2 batch, baseline refresh) stays unadjusted,
+because `previous_ath` baselines are maintained by hand in raw prices — adjusting
+those would invalidate every stored baseline. Mixing is safe: `auto_adjust`
+back-adjusts *older* bars, leaving the most recent price unchanged, so the raw
+live close still aligns with the adjusted history.
+
+Note this shifts RS values slightly for *all* stocks, not just split-affected
+ones, since adjustment also accounts for dividends. That is the more correct
+basis given the index is adjusted the same way.
+
+**Short listings now get an RS verdict.** The calculation used to return `N/A`
+whenever fewer than 211 aligned sessions existed, which also left `curr_rs` and
+`ath_rs` blank (PIRAMALFIN in the results table). A recently-listed stock still
+has real relative strength over its own listed life, so the window now shrinks
+to whatever history exists, down to `MIN_RS_SESSIONS` (20) below which it stays
+`N/A`. The window used is stored as `rs_window` and rendered with a `*` and a
+tooltip, so a 60-session reading is visibly weaker than a full 211-session one
+rather than looking identical.

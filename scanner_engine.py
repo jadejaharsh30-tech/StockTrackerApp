@@ -23,6 +23,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # this the scanner writes to a different database than the routes read from.
 TRACKER_DB = os.environ.get('DATABASE_PATH', os.path.join(BASE_DIR, 'tracker.db'))
 LOOKBACK = 211
+# A short-listed stock still has a relative-strength history over its own life.
+# Below this many aligned sessions the anchored line is too short to mean
+# anything, so the verdict stays N/A; between here and LOOKBACK we use whatever
+# history exists and report the window length alongside the numbers.
+MIN_RS_SESSIONS = 20
 BATCH_SIZE = 50
 
 # Progress is split across phases so the bar keeps moving through the slow
@@ -49,6 +54,7 @@ def init_scanning_results_table():
             ath_outperformance TEXT,
             current_rs REAL,
             ath_rs REAL,
+            rs_window INTEGER,
             profit_ttm_ath TEXT,
             profit_qtr_ath TEXT,
             profit_yoy TEXT,
@@ -93,14 +99,14 @@ def save_scan_results(results):
         for r in results:
             conn.execute("""
                 INSERT INTO ath_scanning_results
-                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs,
+                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs, rs_window,
                  profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points,
                  profit_ttm, profit_peak_fy, profit_meets, profit_criterion, profit_reason,
                  manual_ath_profit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (r['symbol'], r['new_ath_price'], r['trigger_price'],
                   r['green_candle'], r['close_gt_ath'], r['ath_outperformance'],
-                  r.get('current_rs'), r.get('ath_rs'),
+                  r.get('current_rs'), r.get('ath_rs'), r.get('rs_window'),
                   r.get('profit_ttm_ath'), r.get('profit_qtr_ath'), r.get('profit_yoy'),
                   r.get('profit_flag'), r.get('profit_basis'), r.get('profit_points'),
                   r.get('profit_ttm'), r.get('profit_peak_fy'),
@@ -327,7 +333,9 @@ def fetch_ticker_history_for_rs(symbol):
     """
     try:
         yf_sym = f"{symbol}.NS"
-        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=False)
+        # auto_adjust=True: the index series is adjusted, so the stock must be too,
+        # otherwise every split puts a false cliff in the ratio.
+        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=True)
         
         if data.empty:
             return None
@@ -390,7 +398,8 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
             'close_gt_ath': close_gt_ath,
             'ath_outperformance': 'N/A',
             'current_rs': None,
-            'ath_rs': None
+            'ath_rs': None,
+            'rs_window': 0,
         }
 
     # Filter to strictly before today for alignment with live candle
@@ -408,14 +417,26 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
         'close_gt_ath': close_gt_ath,
         'ath_outperformance': rs_results['is_outperforming'],
         'current_rs': rs_results.get('current_rs'),
-        'ath_rs': rs_results.get('ath_rs')
+        'ath_rs': rs_results.get('ath_rs'),
+        'rs_window': rs_results.get('rs_window', 0),
     }
 
 
 def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_series):
     """
-    Calculate ATH Outperformance using Rolling Fixed Anchor RS.
-    Uses a 211-day lookback window.
+    ATH Outperformance via a fixed-anchor relative-strength line.
+
+    Preferred window is LOOKBACK sessions. A recently-listed stock has fewer,
+    but its RS over its own listed life is still a real measurement, so the
+    window shrinks to whatever history exists rather than refusing a verdict.
+    Below MIN_RS_SESSIONS it stays N/A. The window actually used is returned as
+    rs_window so a short-history reading is visibly weaker than a full one.
+
+    NOTE the stock history must be split-adjusted (auto_adjust=True) to match
+    the index series. Unadjusted prices put a cliff in the ratio at every split,
+    and since the anchor sits at the window start, everything after the split
+    reads as a collapse — e.g. a 1:4 split showed current_rs at a quarter of
+    ath_rs while the stock had done nothing wrong.
     """
     try:
         # Build full close series (history + today live)
@@ -428,19 +449,21 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
             'Index': nifty_series,
         }).dropna()
 
-        if len(aligned) < LOOKBACK:
-            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None}
+        if len(aligned) < MIN_RS_SESSIONS:
+            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
+                    'rs_window': len(aligned)}
 
         # Raw ratio
         aligned['RS_Raw'] = aligned['Stock'] / aligned['Index']
 
-        # Window = last LOOKBACK rows
+        # Window = last LOOKBACK rows, or the whole series when it is shorter
         window = aligned.iloc[-LOOKBACK:]
 
         # Anchor value from start of window
         anchor_rs_raw = window['RS_Raw'].iloc[0]
         if anchor_rs_raw == 0:
-            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None}
+            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
+                    'rs_window': len(window)}
 
         # Anchored line for full window
         anchored_line = (window['RS_Raw'] / anchor_rs_raw) * 100
@@ -456,12 +479,14 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
         return {
             'is_outperforming': is_op,
             'current_rs': round(current_anchored, 2),
-            'ath_rs': round(max_anchored, 2)
+            'ath_rs': round(max_anchored, 2),
+            'rs_window': len(window),
         }
 
     except Exception as e:
         logger.error(f"RS calculation error: {e}")
-        return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None}
+        return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
+                'rs_window': 0}
 
 
 # ====================== MAIN SCAN ORCHESTRATOR ======================
@@ -749,7 +774,8 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
         hit_symbols = list(potential_hits.keys())
         yf_hit_symbols = [f"{s}.NS" for s in hit_symbols]
         try:
-            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=False, progress=False)
+            # auto_adjust=True to match the index series — see calculate_rs_outperformance.
+            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=True, progress=False)
         except Exception as e:
             logger.error(f"Batch history fetch failed: {e}")
             hist_data = pd.DataFrame()
