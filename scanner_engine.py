@@ -333,9 +333,8 @@ def fetch_ticker_history_for_rs(symbol):
     """
     try:
         yf_sym = f"{symbol}.NS"
-        # auto_adjust=True: the index series is adjusted, so the stock must be too,
-        # otherwise every split puts a false cliff in the ratio.
-        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=True)
+        # auto_adjust=False by deliberate choice — see calculate_rs_outperformance.
+        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=False)
         
         if data.empty:
             return None
@@ -432,11 +431,18 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
     Below MIN_RS_SESSIONS it stays N/A. The window actually used is returned as
     rs_window so a short-history reading is visibly weaker than a full one.
 
-    NOTE the stock history must be split-adjusted (auto_adjust=True) to match
-    the index series. Unadjusted prices put a cliff in the ratio at every split,
-    and since the anchor sits at the window start, everything after the split
-    reads as a collapse — e.g. a 1:4 split showed current_rs at a quarter of
-    ath_rs while the stock had done nothing wrong.
+    KNOWN LIMITATION, accepted deliberately: the stock history is fetched
+    UNADJUSTED (auto_adjust=False) while the index series is adjusted. A split
+    therefore puts a cliff in the ratio, and since the anchor sits at the window
+    start, sessions after the split read as a collapse — a 1:4 split shows
+    current_rs at roughly a quarter of ath_rs and flips the verdict to N, even
+    though the stock has done nothing wrong.
+
+    This affects only the handful of stocks that split within the window, and
+    the user handles those by hand. Do NOT "fix" this by switching to
+    auto_adjust=True without asking: adjusted prices also fold in dividends and
+    would shift RS for every stock, and the raw series is what the manually
+    maintained previous_ath baselines are expressed in.
     """
     try:
         # Build full close series (history + today live)
@@ -774,8 +780,8 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
         hit_symbols = list(potential_hits.keys())
         yf_hit_symbols = [f"{s}.NS" for s in hit_symbols]
         try:
-            # auto_adjust=True to match the index series — see calculate_rs_outperformance.
-            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=True, progress=False)
+            # auto_adjust=False by deliberate choice — see calculate_rs_outperformance.
+            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=False, progress=False)
         except Exception as e:
             logger.error(f"Batch history fetch failed: {e}")
             hist_data = pd.DataFrame()

@@ -529,3 +529,24 @@ to whatever history exists, down to `MIN_RS_SESSIONS` (20) below which it stays
 `N/A`. The window used is stored as `rs_window` and rendered with a `*` and a
 tooltip, so a 60-session reading is visibly weaker than a full 211-session one
 rather than looking identical.
+
+### 7.14 RS split adjustment: reverted, deliberately
+
+§7.13 changed the RS history fetch to `auto_adjust=True` to remove the split
+cliff. **That has been reverted at the user's request** — the fetch is
+`auto_adjust=False` again.
+
+The tradeoff, decided knowingly: adjusting fixes the handful of stocks that
+split inside the window, but it also folds dividends into the series and so
+shifts RS for *every* stock. The user prefers stable numbers across the whole
+universe and handles the few split-affected names manually, which is also
+consistent with `previous_ath` baselines being maintained in raw prices.
+
+So the behaviour described in §7.13 — a 1:4 split showing `current_rs` at
+roughly a quarter of `ath_rs`, and ATH O.P. reading `N` — **is expected**, not a
+bug to re-fix. `calculate_rs_outperformance` carries a docstring saying so.
+
+The other §7.13 change is **unaffected and still in place**: short listings are
+measured over whatever aligned history they have (down to `MIN_RS_SESSIONS`,
+20) instead of returning `N/A`, with `rs_window` reported. The two changes are
+independent — one is the fetch parameter, the other is the window slicing.
