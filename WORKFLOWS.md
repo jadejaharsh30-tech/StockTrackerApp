@@ -556,12 +556,14 @@ independent — one is the fetch parameter, the other is the window slicing.
 **Custom Scan tab.** A third tab on `/ath-scanner` takes an Excel/CSV of symbols
 and runs the whole chain over that universe instead of `profit_tracker`.
 
-Symbols are read from a `SYMBOL` / `NSE CODE` / `TICKER` / `COMPANY TICKER`
-column when one exists, else the first column; `.NS` suffixes are stripped,
-case and whitespace normalised, blanks and duplicates dropped and counted. The
-parsed list is returned to the browser and posted back with the run request —
-nothing is stored server-side, so an upload the user never runs leaves no state
-to reconcile.
+Symbols are read from the first column whose header matches `SYMBOL`, `NSE CODE`,
+`NSE_CODE`, `TICKER`, `COMPANY TICKER`, `SCRIP` or `CODE` (compared upper-cased
+and stripped), else the first column outright; `.NS` suffixes are stripped, case
+and whitespace normalised, blanks and duplicates dropped and counted. The parsed
+list is returned to the browser and posted back with the run request — nothing is
+stored server-side, so an upload the user never runs leaves no state to
+reconcile. `sample_universe.xlsx` in the repo root is a valid messy example
+(symbol column not first, mixed case, a `.NS` suffix, a duplicate, blank rows).
 
 `run_custom_pipeline()` runs the stages in the only correct order:
 
@@ -583,14 +585,85 @@ so they don't write competing messages.
 It takes `scanner_state` like everything else, so a custom run cannot overlap a
 normal scan or a profit refresh, in either direction.
 
-**Persistent results.** `ath_scanning_results` already survived until the next
-scan overwrote it — only the page forgot, because nothing loaded it on open. Now
-`loadLastScanResults()` runs on `DOMContentLoaded`, and a **View Scan Results**
-button re-displays them on demand.
+**Two result sets, side by side.** The tracked scan and the custom scan keep
+their hits in **separate tables**, so neither run destroys the other's output:
 
-A new `scan_runs` table records one row per completed scan (when, which
-universe, its size, the profit criterion, the hit count) purely so the page can
-*label* what it is showing: *"Showing the last scan: 2026-09-10 16:32 · custom
-universe of 287 symbols · Req. Profit Dual · 22 hits"*. The banner hides itself
-as soon as a fresh scan renders, since the results are then current rather than
-restored.
+| Scope | Table | Written by |
+|---|---|---|
+| `tracked` | `ath_scanning_results` | Run ATH Scan (Scanner View tab) |
+| `custom` | `ath_scanning_results_custom` | Run Full Pipeline (Custom Scan tab) |
+
+`RESULTS_TABLES` maps scope → table and `_results_table()` resolves it, falling
+back to `tracked` for anything unrecognised so a stale client can never address a
+table that does not exist. `init_scanning_results_table`, `save_scan_results`,
+`get_scan_results` and `run_full_scan` all take `scope=`; `/api/scanner/results`
+and `/api/scanner/last-run` take `?scope=`, and `/api/profit/apply-flag` takes it
+in the body so applying from the custom tab reads the custom scan's verdicts. A
+symbol present in one scope but not the other comes back *skipped*, never
+mis-flagged from the wrong table.
+
+`scan_runs` needed no migration for this: its `universe` column already stored
+`'tracked'` / `'custom'`, so it doubles as the scope key and
+`get_last_scan_run(user_id, scope)` just filters on it.
+
+The two scopes are also independent in the DOM. `SCOPE_IDS` maps each scope to
+its own results area, counter, banner and buttons, and every selection query is
+rooted at that area rather than `document` — both tables carry `.row-check`, so a
+document-wide query would silently mix them.
+
+**Persistent results are shown on request, never on load.** Each scope's table
+survives until the next scan of *that* scope overwrites it, but the page
+deliberately does **not** render stored rows on open: a stale table sitting under
+today's date reads as today's scan. On `DOMContentLoaded` only the metadata is
+fetched, which stamps the **View Scan Results** button with the stored run's time
+(*"View Scan Results 📋 · 10 Sep, 16:32"*) and disables it when there is nothing
+stored. The rows load when the user actually clicks.
+
+`scan_runs` records one row per completed scan (when, which universe, its size,
+the profit criterion, the hit count) so the banner can label what is displayed:
+*"Showing the scan of **10 Sep, 16:32** · custom universe of 287 symbols · Req.
+Profit Dual · 22 hits"*. The banner hides as soon as a fresh scan renders, since
+those results are current rather than restored.
+
+### 7.16 Why the hosted app disagreed with the local one (RS only)
+
+Symptom: the same scan, the same day, the same 9 hits, identical prices and
+identical Y/N verdicts — but different `CURR RS` / `ATH RS` numbers on
+PythonAnywhere. Local matched TradingView; hosted did not.
+
+**Cause: a dividend adjustment, from a commit that never reached `main`.**
+`31007c6` reverted the RS fetch to `auto_adjust=False`, but `main` was at
+`afebb02`, which merged only up to `9016a4e` — the commit that had set
+`auto_adjust=True`. Local ran the branch; PythonAnywhere deploys from `main`.
+
+The signature is unmistakable once you look at the ratios. RS is anchored at the
+window start, so `RS(t) = (S_t/S_0) / (I_t/I_0) × 100`. Adjusted prices back-adjust
+history *downward* by dividends, which shrinks `S_0` and inflates every RS value
+by exactly the window's cumulative dividend factor — a constant per stock, and
+zero for a stock that paid nothing:
+
+| Symbol | Local (raw) | Hosted (adjusted) | Ratio | Pays a dividend? |
+|---|---|---|---|---|
+| CHENNPETRO | 177.04 | 186.23 | 1.0519 | yes, high yield |
+| REDINGTON | 160.80 | 164.33 | 1.0220 | yes |
+| INDIAGLYCO | 33.08 | 33.37 | 1.0088 | yes, small |
+| WELCORP | 302.33 | 303.33 | 1.0033 | yes, small |
+| **LENSKART** | 176.82 | 176.82 | **1.0000** | **no — recent listing** |
+| **STLTECH** | 751.66 | 751.66 | **1.0000** | **no — suspended** |
+
+Both zero-dividend stocks match exactly. Nothing else in the pipeline produces
+that pattern, which is what rules out the other candidates (a `^CRSLDX` →
+`^NSEI` benchmark fallback would scale *every* stock by the same factor on a
+given day; a timezone-shifted end date would change the last bar, and the prices
+were identical).
+
+**Fix:** merge the branch into `main` and pull on the host. There is no code
+change to make — the branch was already correct.
+
+**The standing hazard this exposes.** `requirements.txt` pins nothing
+(`yfinance` bare), and yfinance changed `download()`'s `auto_adjust` default to
+`True` in 0.2.51. Every RS call site passes the flag explicitly, so the default
+does not bite *today*, but two environments installing "latest" on different days
+is a live source of divergence for anything that does not. When local and hosted
+disagree numerically, check the deployed commit **and** `pip show yfinance` on
+both before suspecting the maths.

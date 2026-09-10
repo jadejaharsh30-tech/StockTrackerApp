@@ -2968,8 +2968,23 @@ def export_sectors_csv():
 
 from scanner_engine import (run_full_scan, get_profit_tracker_tickers, get_scan_results,
                             init_scanning_results_table, promote_ath_eod, resync_ath_baselines,
-                            run_custom_pipeline, get_last_scan_run, record_scan_run)
-import threading 
+                            run_custom_pipeline, get_last_scan_run, record_scan_run,
+                            RESULTS_TABLES)
+import threading
+
+
+def _scan_scope(payload=None):
+    """
+    Which results set a request is talking about: 'tracked' or 'custom'.
+
+    Read from the JSON body when one is given, else the query string. Anything
+    unrecognised falls back to 'tracked' so a stale client cannot address a
+    table that does not exist.
+    """
+    raw = (payload or {}).get('scope') if payload is not None else request.args.get('scope')
+    scope = str(raw or 'tracked').lower()
+    return scope if scope in RESULTS_TABLES else 'tracked'
+
 
 # --- ATH SCANNER ROUTES ---
 @app.route('/ath-scanner')
@@ -3310,8 +3325,9 @@ def run_new_scanner():
     if not tickers:
         return jsonify({'status': 'error', 'message': 'No tickers found in profit tracker.'})
 
-    # Ensure staging table exists with new schema
-    init_scanning_results_table()
+    # Ensure the TRACKED results table exists with the current schema. The custom
+    # tab's results live in their own table and are left untouched.
+    init_scanning_results_table('tracked')
 
     # Optional slack (%) below the profit peak when judging "at ATH"
     payload = request.get_json(silent=True) or {}
@@ -3329,7 +3345,7 @@ def run_new_scanner():
     def task(user_id):
         try:
             results = run_full_scan(tickers, user_id=user_id, profit_tolerance_pct=tolerance,
-                                    profit_criterion=criterion)
+                                    profit_criterion=criterion, scope='tracked')
             record_scan_run(user_id, 'tracked', len(tickers), criterion, len(results))
         except Exception as e:
             status_manager.set_status(user_id, False, 0, 0, f"Scan error: {str(e)}")
@@ -3366,9 +3382,13 @@ def get_scanner_status_api():
 @app.route('/api/scanner/results', methods=['GET'])
 @login_required
 def get_scanner_results():
-    """Fetch current scan results from staging table."""
-    results = get_scan_results()
-    return jsonify(results)
+    """
+    Fetch one scope's stored scan results.
+
+    ?scope=tracked (default) is the Scanner View universe; ?scope=custom is the
+    uploaded universe. They live in separate tables, so each survives the other.
+    """
+    return jsonify(get_scan_results(_scan_scope()))
 
 @app.route('/api/scanner/upload-universe', methods=['POST'])
 @login_required
@@ -3490,8 +3510,9 @@ def run_custom_scan():
 @app.route('/api/scanner/last-run', methods=['GET'])
 @login_required
 def scanner_last_run():
-    """Metadata describing whatever is currently in ath_scanning_results."""
-    return jsonify({'success': True, 'last_run': get_last_scan_run(current_user.id)})
+    """Metadata describing whatever is currently stored for the given scope."""
+    return jsonify({'success': True,
+                    'last_run': get_last_scan_run(current_user.id, _scan_scope())})
 
 
 @app.route('/api/scanner/reset', methods=['POST'])
@@ -3608,12 +3629,16 @@ def apply_profit_flag():
     if not symbols:
         return jsonify({'success': False, 'error': 'No symbols provided.'})
 
+    # Verdicts are read from whichever scan produced the rows the user is looking
+    # at, so applying from the custom tab uses the custom scan's verdicts.
+    table = RESULTS_TABLES[_scan_scope(data)]
+
     conn = get_db()
     updated, skipped, missing = [], [], []
     try:
         placeholders = ','.join(['?'] * len(symbols))
         rows = conn.execute(
-            f"SELECT symbol, profit_flag FROM ath_scanning_results WHERE symbol IN ({placeholders})",
+            f"SELECT symbol, profit_flag FROM {table} WHERE symbol IN ({placeholders})",
             symbols
         ).fetchall()
         verdicts = {r['symbol']: r['profit_flag'] for r in rows}

@@ -39,12 +39,27 @@ PHASE3_SHARE = 0.20   # RS / green-candle analysis of hits
 
 # ====================== DATABASE HELPERS ======================
 
-def init_scanning_results_table():
-    """Create or recreate the ath_scanning_results table with the new schema."""
+# The tracked-universe scan and the custom-universe scan keep their results in
+# SEPARATE tables, so running one never destroys the other's output. 'tracked'
+# keeps the historic table name so existing databases carry straight over.
+RESULTS_TABLES = {
+    'tracked': 'ath_scanning_results',
+    'custom': 'ath_scanning_results_custom',
+}
+
+
+def _results_table(scope):
+    """Table name for a scan scope. Unknown scopes fall back to tracked."""
+    return RESULTS_TABLES.get(scope, RESULTS_TABLES['tracked'])
+
+
+def init_scanning_results_table(scope='tracked'):
+    """Create or recreate one scope's results table with the current schema."""
+    table = _results_table(scope)
     conn = sqlite3.connect(TRACKER_DB)
-    conn.execute("DROP TABLE IF EXISTS ath_scanning_results")
-    conn.execute("""
-        CREATE TABLE ath_scanning_results (
+    conn.execute(f"DROP TABLE IF EXISTS {table}")
+    conn.execute(f"""
+        CREATE TABLE {table} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT NOT NULL,
             new_ath_price REAL,
@@ -72,7 +87,7 @@ def init_scanning_results_table():
     """)
     conn.commit()
     conn.close()
-    logger.info("ath_scanning_results table initialized with new schema.")
+    logger.info(f"{table} initialized with the current schema.")
 
 
 def get_profit_tracker_tickers(user_id=None):
@@ -91,14 +106,15 @@ def get_profit_tracker_tickers(user_id=None):
         conn.close()
 
 
-def save_scan_results(results):
-    """Clear staging table and insert fresh results."""
+def save_scan_results(results, scope='tracked'):
+    """Clear this scope's results table and insert fresh results."""
+    table = _results_table(scope)
     conn = sqlite3.connect(TRACKER_DB)
     try:
-        conn.execute("DELETE FROM ath_scanning_results")
+        conn.execute(f"DELETE FROM {table}")
         for r in results:
-            conn.execute("""
-                INSERT INTO ath_scanning_results
+            conn.execute(f"""
+                INSERT INTO {table}
                 (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs, rs_window,
                  profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points,
                  profit_ttm, profit_peak_fy, profit_meets, profit_criterion, profit_reason,
@@ -113,17 +129,20 @@ def save_scan_results(results):
                   r.get('profit_meets'), r.get('profit_criterion'), r.get('profit_reason'),
                   r.get('manual_ath_profit')))
         conn.commit()
-        logger.info(f"Saved {len(results)} scan results to staging table.")
+        logger.info(f"Saved {len(results)} scan results to {table}.")
     finally:
         conn.close()
 
 
 def init_scan_runs_table(conn=None):
     """
-    One row per completed scan. `ath_scanning_results` already survives until the
-    next scan overwrites it, so this only records what produced those rows —
-    when, over which universe, and under which profit criterion — so the page can
-    say what it is showing after a reload.
+    One row per completed scan. Each scope's results table already survives until
+    the next scan of THAT scope overwrites it, so this only records what produced
+    those rows — when, over which universe, and under which profit criterion — so
+    the page can say what it is showing when the user asks to see it again.
+
+    `universe` doubles as the scope key ('tracked' / 'custom'), which is why
+    splitting the results tables needed no migration here.
     """
     own = conn is None
     conn = conn or sqlite3.connect(TRACKER_DB)
@@ -162,19 +181,28 @@ def record_scan_run(user_id, universe, universe_size, criterion, hits):
         conn.close()
 
 
-def get_last_scan_run(user_id=None):
-    """Metadata for the results currently sitting in ath_scanning_results."""
+def get_last_scan_run(user_id=None, scope=None):
+    """
+    Metadata for the results currently sitting in one scope's results table.
+
+    With no scope, returns the most recent run of either kind — used only where
+    the caller genuinely wants "the last thing that ran".
+    """
     conn = sqlite3.connect(TRACKER_DB)
     conn.row_factory = sqlite3.Row
     try:
         init_scan_runs_table(conn)
         conn.commit()
+        where, params = [], []
         if user_id:
-            row = conn.execute(
-                "SELECT * FROM scan_runs WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-                (user_id,)).fetchone()
-        else:
-            row = conn.execute("SELECT * FROM scan_runs ORDER BY id DESC LIMIT 1").fetchone()
+            where.append("user_id = ?")
+            params.append(user_id)
+        if scope:
+            where.append("universe = ?")
+            params.append(scope)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        row = conn.execute(
+            f"SELECT * FROM scan_runs {clause} ORDER BY id DESC LIMIT 1", params).fetchone()
         return dict(row) if row else None
     except sqlite3.OperationalError:
         return None
@@ -182,15 +210,21 @@ def get_last_scan_run(user_id=None):
         conn.close()
 
 
-def get_scan_results():
-    """Fetch current results from the staging table."""
+def get_scan_results(scope='tracked'):
+    """
+    Fetch one scope's stored results.
+
+    Returns [] rather than raising when that scope has never been scanned, so a
+    fresh database answers "nothing yet" instead of failing the request.
+    """
+    table = _results_table(scope)
     conn = sqlite3.connect(TRACKER_DB)
     conn.row_factory = sqlite3.Row
     try:
-        rows = conn.execute(
-            "SELECT * FROM ath_scanning_results ORDER BY symbol"
-        ).fetchall()
+        rows = conn.execute(f"SELECT * FROM {table} ORDER BY symbol").fetchall()
         return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
     finally:
         conn.close()
 
@@ -712,7 +746,7 @@ def annotate_profit_flags(results, tolerance_pct=0.0, user_id=None, criterion='D
 
 
 def run_full_scan(tickers, progress_callback=None, user_id=None, profit_tolerance_pct=0.0,
-                  profit_criterion='D'):
+                  profit_criterion='D', scope='tracked'):
     """
     Run the optimized full ATH scan using batch processing.
 
@@ -895,7 +929,7 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
             logger.error(f"Profit classification failed: {e}")
 
     # Save to staging table
-    save_scan_results(results)
+    save_scan_results(results, scope=scope)
 
     # Update today_ath for all hits
     update_today_ath(results)
@@ -977,13 +1011,16 @@ def run_custom_pipeline(tickers, user_id=None, refresh_profit=False, refresh_bas
 
     stage = idx
     say(stage, 'ATH scan', 0.0, f'scanning {len(tickers)} symbols...')
-    init_scanning_results_table()
+    # Writes to the CUSTOM results table — a custom run never overwrites the
+    # tracked-universe results, and vice versa.
+    init_scanning_results_table('custom')
     results = run_full_scan(
         tickers,
         progress_callback=lambda p, t, m: say(stage, 'ATH scan', (p / t) if t else 0, m),
         user_id=None,                       # this orchestrator owns the status line
         profit_tolerance_pct=profit_tolerance_pct,
-        profit_criterion=profit_criterion)
+        profit_criterion=profit_criterion,
+        scope='custom')
 
     record_scan_run(user_id, 'custom', len(tickers), profit_criterion, len(results))
     msg = f"Custom scan complete. {len(results)} ATH hits from {len(tickers)} symbols."
