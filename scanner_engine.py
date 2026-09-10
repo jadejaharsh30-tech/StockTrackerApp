@@ -22,18 +22,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Honour DATABASE_PATH like app.py/daily_tasks.py/scanner_status.py do — without
 # this the scanner writes to a different database than the routes read from.
 TRACKER_DB = os.environ.get('DATABASE_PATH', os.path.join(BASE_DIR, 'tracker.db'))
-# RS anchor, expressed exactly as the TradingView indicator expresses it.
+# RS anchor. LOOKBACK is a ROW COUNT: iloc[-LOOKBACK:] holds that many rows, so
+# the anchor lands (LOOKBACK - 1) bars before the latest bar.
 #
-#   Pine:   anchoredRS = rs / rs_at(last_bar_index - barsBackInput) * 100
-#           with barsBackInput = 212
-#
-# so the anchor sits 212 BARS BACK from the latest bar, and the window from the
-# anchor to today inclusive holds 213 bars. Pandas slices by row count, not by
-# bar offset, hence the +1: iloc[-213:] puts the anchor 212 rows before the end.
-# Keep these two lines together — setting a row count directly is how this drifted
-# two bars away from the indicator in the first place.
-RS_BARS_BACK = 212               # == the Pine `barsBackInput` input
-LOOKBACK = RS_BARS_BACK + 1      # rows to slice, so anchor lands RS_BARS_BACK back
+# UNRESOLVED, deliberately left as-is: the TradingView indicator anchors at
+# `last_bar_index - barsBackInput` with barsBackInput = 212, i.e. 212 bars back,
+# which would make LOOKBACK 213. This sits at 211 (210 bars back) because that is
+# the value that has historically agreed with the chart, and the suspected cause
+# of the recent mismatch is bad yfinance data after market hours rather than the
+# window. Check against the chart DURING LIVE MARKET before changing it — a
+# post-market comparison cannot settle this. See WORKFLOWS.md §7.18.
+LOOKBACK = 211
+RS_BARS_BACK = LOOKBACK - 1      # derived: bars before the latest bar
+PINE_BARS_BACK = 212             # what the indicator uses, for comparison only
 # A short-listed stock still has a relative-strength history over its own life.
 # Below this many aligned sessions the anchored line is too short to mean
 # anything, so the verdict stays N/A; between here and LOOKBACK we use whatever
@@ -562,7 +563,7 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
     ATH Outperformance via a fixed-anchor relative-strength line.
 
     This mirrors the TradingView indicator ("Anchored & ATH RS"): the anchor is
-    the stock/index ratio RS_BARS_BACK (212) bars before the latest bar, the line
+    the stock/index ratio a fixed number of bars before the latest bar, the line
     is that ratio re-expressed as a percentage of the anchor, and the verdict is
     whether today sits at the line's own maximum. Match any change here against
     the Pine source before shipping it — the two are meant to agree bar for bar.
@@ -572,6 +573,13 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
     window shrinks to whatever history exists rather than refusing a verdict.
     Below MIN_RS_SESSIONS it stays N/A. The window actually used is returned as
     rs_window so a short-history reading is visibly weaker than a full one.
+
+    That shrink is NOT a departure from the indicator, it is the same rule. Pine
+    sets its anchor with `if bar_index == last_bar_index - barsBackInput ... else
+    if bar_index == 0`, and on a listing shorter than barsBackInput the first
+    condition can never match, so the else-branch anchors it at the first bar —
+    exactly what slicing the whole series does here. A starred row is comparable
+    to the chart like any other.
 
     KNOWN LIMITATION, accepted deliberately: the stock history is fetched
     UNADJUSTED (auto_adjust=False) while the index series is adjusted. A split

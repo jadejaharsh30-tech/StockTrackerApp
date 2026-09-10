@@ -767,3 +767,45 @@ the RS numbers themselves:**
 The last one is why a starred row can never match a chart: the indicator has no
 such concept. The alignment difference only bites when Yahoo's `^CRSLDX` series
 is missing a session the stock has, which shifts the window by that many bars.
+
+### 7.19 §7.18 reverted, and a correction about short listings
+
+**Reverted.** `LOOKBACK` is back to **211 rows (210 bars back)**, not 213. The
+two-bar gap against the indicator's `barsBackInput = 212` is real arithmetic and
+still documented in §7.18, but 211 is the value that has historically agreed
+with the chart, and the more likely culprit for the recent mismatch is **yfinance
+data after market hours** rather than the window. Both scans that disagreed were
+run around 1–2 a.m.
+
+The gap therefore stays **open, not fixed**. It cannot be settled from a
+post-market run, because the suspected fault and the candidate fix would both
+show up as "numbers are off by a few percent". The check has to be made against
+the chart **during live market hours**, on a stock with full history.
+
+`RS_BARS_BACK` is now *derived* (`LOOKBACK - 1`) rather than set, and
+`PINE_BARS_BACK = 212` records the indicator's value beside it, so the two can be
+compared without either being silently authoritative.
+`test_rs_matches_pine.py` asserts the anchor lands where `RS_BARS_BACK` says and
+that the numbers equal the Pine formula fed that same offset, then **prints** the
+gap rather than failing on it.
+
+**Correction: short listings are NOT a departure from the indicator.** §7.18
+claimed Pine plots nothing before its anchor bar, so starred rows could never
+match a chart. That is wrong. The Pine anchor is:
+
+```pine
+if bar_index == (last_bar_index - barsBackInput)
+    rs_213_back := rs
+else if bar_index == 0
+    rs_213_back := rs
+```
+
+On a listing shorter than `barsBackInput`, `last_bar_index - barsBackInput` is
+negative and matches no bar, so the **else-branch anchors at the first bar** —
+precisely what slicing the whole series does here. LENSKART charts fine in
+TradingView and is directly comparable; the `*` marks the same fallback the
+indicator applies silently. `test_rs_matches_pine.py` now covers this case, and
+it passes.
+
+The remaining departures from the Pine source are unchanged: green candle `>=`
+vs `>`, the 0.01% verdict slack, and inner-join vs forward-filled alignment.
