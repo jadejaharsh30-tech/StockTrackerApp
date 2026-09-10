@@ -7,7 +7,10 @@ import time
 # ================= CONFIGURATION =================
 DB_NAME = "market_data_yfinance.db"
 TEST_TICKERS = ["JAMNAAUTO.NS", "JINDALSTEL.NS", "LT.NS", "MFSL.NS", "SBIN.NS", "SHRIRAMFIN.NS", "TORNTPHARM.NS"]
-LOOKBACK = 211
+# Anchor 212 bars back from the latest bar, as the TradingView indicator does.
+# 213 rows, because slicing by row count puts the anchor one row further in.
+RS_BARS_BACK = 212
+LOOKBACK = RS_BARS_BACK + 1
 # =================================================
 
 def fetch_nifty_live():

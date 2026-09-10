@@ -105,7 +105,7 @@ The most complex subsystem, and it has **two live implementations wired into the
 - **`scanner_engine.py`** (current/primary, imported at `app.py:2970`) — a 3-phase batch design:
   1. **Sync**: any `profit_tracker` symbol missing from `ath_tracking_table` gets a full `yf.download(period="max")` to seed its lifetime-high baseline (`previous_ath`).
   2. **Fast batch detect**: 50-ticker batches, 5-day history, flags "potential hits" where today's high ≥ stored `previous_ath`.
-  3. **In-depth analysis** (only for hits): Green Candle (`close ≥ prev_close`), Close > ATH (`close > previous_ath`), and RS Outperformance — a 211-day "rolling fixed-anchor RS" against Nifty 500 (`^CRSLDX`, falling back to `^NSEI`): anchor the stock/index close ratio at the start of the window, and flag `Y` if today's anchored ratio is within 0.01% of the window's max.
+  3. **In-depth analysis** (only for hits): Green Candle (`close ≥ prev_close`), Close > ATH (`close > previous_ath`), and RS Outperformance — a 211-day "rolling fixed-anchor RS" against Nifty 500 (`^CRSLDX`, no fallback index — see §7.17): anchor the stock/index close ratio at the start of the window, and flag `Y` if today's anchored ratio is within 0.01% of the window's max.
   Results land in `ath_scanning_results` (wiped/rebuilt each run) and `ath_tracking_table.today_ath`.
 - **`ath_scanner.py`** (`ATHScanner` class, still imported and instantiated at `app.py:2988`/`3013`, driving `/api/ath/run-daily` and `/api/ath/run-refresh`) — an older single-strategy, non-batched ATH-break detector, explicitly labeled `LEGACY SCANNER` in the template JS/button IDs. **It is wired to live buttons but non-functional**: it reads and writes an `ath_price` column that does not exist in the current `ath_tracking_table` schema (the column is `previous_ath`), so both its scan methods raise `OperationalError: no such column: ath_price`. See §6 for the full defect list.
 
@@ -223,14 +223,14 @@ SELECT symbol FROM ath_tracking_table WHERE previous_ath = 0 OR previous_ath IS 
 
 ### 7.3 The RS-outperformance calculation (the one genuinely subtle formula)
 
-"ATH Outperformance" is *not* a simple return comparison. `calculate_rs_outperformance` builds a **rolling fixed-anchor relative-strength line** over `LOOKBACK = 211` sessions:
+"ATH Outperformance" is *not* a simple return comparison. `calculate_rs_outperformance` builds a **rolling fixed-anchor relative-strength line** anchored `RS_BARS_BACK = 212` bars before the latest bar (`LOOKBACK = 213` rows — see §7.18):
 
 1. Append today's live close to the fetched history, inner-join against the Nifty 500 series (`^CRSLDX`, fallback `^NSEI`) so holidays drop out.
 2. `RS_Raw = Stock_Close / Index_Close` per session.
-3. Take the last 211 rows; **re-anchor** to the first row of that window: `anchored = RS_Raw / RS_Raw[0] * 100`.
+3. Take the last 213 rows; **re-anchor** to the first row of that window: `anchored = RS_Raw / RS_Raw[0] * 100`.
 4. Flag `Y` if `current_anchored >= max_anchored * 0.9999`.
 
-So the question it answers is *"is the stock's ratio-to-benchmark at its own 211-session high right now?"* — an ATH in **relative** terms, mirroring the price ATH. The `0.9999` factor is a float-equality tolerance, not a real tolerance band (≈0.01%).
+So the question it answers is *"is the stock's ratio-to-benchmark at its own 213-session high right now?"* — an ATH in **relative** terms, mirroring the price ATH. The `0.9999` factor is a float-equality tolerance, not a real tolerance band (≈0.01%).
 
 Constraint to know: it needs 211 *aligned* rows but `run_full_scan` only fetches `period="1y"` (~245 sessions). Any symbol with a shorter listing history, or enough missing sessions to drop the join below 211 rows, silently returns `'N/A'` rather than `Y`/`N`. Since ATH outperformance is the hard gate in `get_investment_category`, **`N/A` behaves as a rejection downstream** (it isn't `'Y'`).
 
@@ -702,3 +702,68 @@ gone. The rebuild moved inside `run_full_scan`, immediately before
 in it and a failed scan leaves the last good run intact. Verified: with the
 benchmark unreachable, a scan returns `[]` and both the stored rows and their
 `scan_runs` metadata are unchanged.
+
+### 7.18 The RS anchor was two bars adrift of the TradingView indicator
+
+The scanner's RS is meant to reproduce the Pine indicator *"Anchored & ATH RS"*.
+It didn't, and the gap was in one number.
+
+**Pine anchors 212 bars back from the latest bar:**
+
+```pine
+barsBackInput = input.int(212, "Bars Back")
+
+var float rs_213_back = na
+if bar_index == (last_bar_index - barsBackInput)
+    rs_213_back := rs                       // rs = close / comp * 100
+
+anchoredRS = rs / rs_213_back * 100
+```
+
+So the anchor bar is `last_bar_index - 212`, and the window from anchor to the
+latest bar **inclusive** holds 213 bars.
+
+**The Python sliced by row count, which is one step further in.** For `n` rows,
+`aligned.iloc[-K:]` returns rows `n-K … n-1`; the anchor is row `n-K` and the
+latest is `n-1`, so the anchor sits `K-1` bars back, not `K`. With `LOOKBACK =
+211` the anchor landed **210 bars back — two short of the indicator.**
+
+Two bars sounds negligible and is not. The anchor is a single day's ratio and
+everything is expressed as a percentage of it, so moving it re-scales the whole
+line. On a synthetic 248-session series the same data gave:
+
+| Slice | Anchor lands | current_rs |
+|---|---|---|
+| `iloc[-211:]` (old) | 210 bars back | 133.27 |
+| `iloc[-212:]` | 211 bars back | 129.07 |
+| `iloc[-213:]` (correct) | **212 bars back** | **130.21** ✓ Pine |
+
+A 2.4% error, on every stock, with each value still looking like a perfectly
+ordinary RS reading — the same species of silent wrongness as §7.16 and §7.17.
+
+**The fix keeps the two numbers tied together** so the offset cannot be
+reintroduced by editing a row count:
+
+```python
+RS_BARS_BACK = 212               # == the Pine `barsBackInput`
+LOOKBACK = RS_BARS_BACK + 1      # rows to slice, so the anchor lands 212 back
+```
+
+`RS_FULL_WINDOW` in `templates/ath_scanner.html` (which drives the short-history
+`*`) moved to 213 to match. `test_rs_matches_pine.py` transcribes the Pine
+anchoring directly and asserts our output equals it across five series lengths —
+run it after any change in the RS path.
+
+**Three departures from the Pine source remain, all deliberate, none affecting
+the RS numbers themselves:**
+
+| | Pine | Here |
+|---|---|---|
+| Green candle | `close > close[1]` | `close >= prev_close` (differs only on an unchanged close) |
+| RS verdict | `anchoredRS >= ath_value`, exact | `>= max * 0.9999`, 0.01% float slack |
+| Session alignment | comparison symbol forward-filled onto the stock's bars | inner join; sessions the two don't share are dropped |
+| Short listings | nothing plotted before the anchor bar | measured over available history, flagged `*` |
+
+The last one is why a starred row can never match a chart: the indicator has no
+such concept. The alignment difference only bites when Yahoo's `^CRSLDX` series
+is missing a session the stock has, which shifts the window by that many bars.

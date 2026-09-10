@@ -788,10 +788,12 @@
         if (node) node.innerText = text;
     }
 
-    // RS is measured over whatever aligned history a stock has, up to 211
-    // sessions. A recent listing gets a shorter window rather than no verdict,
+    // RS is measured over whatever aligned history a stock has, up to 213
+    // sessions (the anchor sits 212 bars back, matching the TradingView
+    // indicator). A recent listing gets a shorter window rather than no verdict,
     // so mark it so a short reading isn't mistaken for a full one.
-    const RS_FULL_WINDOW = 211;
+    // Keep in step with scanner_engine.LOOKBACK.
+    const RS_FULL_WINDOW = 213;
 
     function rsTitle(row) {
         const w = row.rs_window;
