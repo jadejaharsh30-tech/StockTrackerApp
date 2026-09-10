@@ -2967,7 +2967,7 @@ def export_sectors_csv():
     )
 
 from scanner_engine import (run_full_scan, get_profit_tracker_tickers, get_scan_results,
-                            init_scanning_results_table, promote_ath_eod, resync_ath_baselines,
+                            promote_ath_eod, resync_ath_baselines,
                             run_custom_pipeline, get_last_scan_run, record_scan_run,
                             RESULTS_TABLES)
 import threading
@@ -3325,9 +3325,9 @@ def run_new_scanner():
     if not tickers:
         return jsonify({'status': 'error', 'message': 'No tickers found in profit tracker.'})
 
-    # Ensure the TRACKED results table exists with the current schema. The custom
-    # tab's results live in their own table and are left untouched.
-    init_scanning_results_table('tracked')
+    # The tracked results table is rebuilt inside run_full_scan, once the scan
+    # actually has hits to write, so a scan that aborts early (e.g. the ^CRSLDX
+    # benchmark is unreachable) leaves the previous run's results readable.
 
     # Optional slack (%) below the profit peak when judging "at ATH"
     payload = request.get_json(silent=True) or {}

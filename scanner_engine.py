@@ -401,17 +401,44 @@ def sync_new_stocks_to_ath_tracker(tickers, progress_callback=None):
 
 # ====================== LIVE DATA ======================
 
+RS_BENCHMARK = "^CRSLDX"        # Nifty 500 — the ONLY benchmark for RS
+INDEX_FETCH_ATTEMPTS = 3
+
+
 def fetch_nifty_live():
-    """Fetch Nifty 500 (^CRSLDX) 2-year daily data for RS calculation."""
-    logger.info("Fetching Nifty 500 live data...")
-    idx = yf.download("^CRSLDX", period="2y", interval="1d", progress=False, auto_adjust=True)
+    """
+    Fetch Nifty 500 (^CRSLDX) 2-year daily data for RS calculation.
+
+    There is deliberately NO fallback to another index. RS is the ratio of the
+    stock to this specific benchmark, so quietly swapping in Nifty 50 would
+    change every number on the page by the ratio of the two indices while
+    looking entirely plausible — the same class of silent wrongness as an
+    unnoticed price-adjustment change. A missing benchmark is a failed scan,
+    not a scan against something else.
+
+    A transient empty response is retried, because retrying is how you make
+    ^CRSLDX work; substituting a different index is not.
+    """
+    idx = pd.DataFrame()
+    for attempt in range(1, INDEX_FETCH_ATTEMPTS + 1):
+        logger.info(f"Fetching {RS_BENCHMARK} (attempt {attempt}/{INDEX_FETCH_ATTEMPTS})...")
+        try:
+            idx = yf.download(RS_BENCHMARK, period="2y", interval="1d",
+                              progress=False, auto_adjust=True)
+        except Exception as e:
+            logger.warning(f"{RS_BENCHMARK} fetch attempt {attempt} raised: {e}")
+            idx = pd.DataFrame()
+        if not idx.empty:
+            break
+        if attempt < INDEX_FETCH_ATTEMPTS:
+            time.sleep(2 * attempt)
 
     if idx.empty:
-        logger.warning("^CRSLDX empty, falling back to ^NSEI")
-        idx = yf.download("^NSEI", period="2y", interval="1d", progress=False, auto_adjust=True)
-
-    if idx.empty:
-        raise RuntimeError("Could not fetch any Nifty index data.")
+        raise RuntimeError(
+            f"Could not fetch the {RS_BENCHMARK} (Nifty 500) benchmark after "
+            f"{INDEX_FETCH_ATTEMPTS} attempts. RS is measured against this index only, "
+            f"so the scan is stopped rather than run against a different one. "
+            f"Check network access to Yahoo Finance and retry.")
 
     # Handle multi-index columns (yfinance change)
     if isinstance(idx.columns, pd.MultiIndex):
@@ -928,7 +955,10 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
         except Exception as e:
             logger.error(f"Profit classification failed: {e}")
 
-    # Save to staging table
+    # Rebuild the results table only now that there is something to write. Doing
+    # it up front would mean an aborted scan — a missing ^CRSLDX benchmark, say —
+    # left the user with an empty table and no way back to the previous run.
+    init_scanning_results_table(scope)
     save_scan_results(results, scope=scope)
 
     # Update today_ath for all hits
@@ -1012,8 +1042,8 @@ def run_custom_pipeline(tickers, user_id=None, refresh_profit=False, refresh_bas
     stage = idx
     say(stage, 'ATH scan', 0.0, f'scanning {len(tickers)} symbols...')
     # Writes to the CUSTOM results table — a custom run never overwrites the
-    # tracked-universe results, and vice versa.
-    init_scanning_results_table('custom')
+    # tracked-universe results, and vice versa. run_full_scan rebuilds that table
+    # itself, once it has results to put in it.
     results = run_full_scan(
         tickers,
         progress_callback=lambda p, t, m: say(stage, 'ATH scan', (p / t) if t else 0, m),

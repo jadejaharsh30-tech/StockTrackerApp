@@ -14,8 +14,13 @@ def fetch_nifty_live():
     print("Fetching LIVE Nifty 500 Data...")
     # Fetch 2y history + Today's live candle
     idx = yf.download("^CRSLDX", period="2y", interval="1d", progress=False, auto_adjust=True)
-    if idx.empty: idx = yf.download("^NSEI", period="2y", interval="1d", progress=False, auto_adjust=True)
-    
+    # No fallback index, deliberately — see scanner_engine.fetch_nifty_live. This
+    # script exists to check the scanner's RS maths, so it must measure against
+    # the same benchmark or it is checking nothing.
+    if idx.empty:
+        raise RuntimeError("Could not fetch ^CRSLDX (Nifty 500). RS uses this index only.")
+
+
     if isinstance(idx.columns, pd.MultiIndex): series = idx['Close'].iloc[:, 0]
     else: series = idx['Close']
     

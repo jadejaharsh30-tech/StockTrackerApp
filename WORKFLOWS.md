@@ -667,3 +667,38 @@ does not bite *today*, but two environments installing "latest" on different day
 is a live source of divergence for anything that does not. When local and hosted
 disagree numerically, check the deployed commit **and** `pip show yfinance` on
 both before suspecting the maths.
+
+### 7.17 The RS benchmark is `^CRSLDX` only — no fallback
+
+`fetch_nifty_live()` used to fall back to `^NSEI` (Nifty 50) when `^CRSLDX`
+(Nifty 500) came back empty. That fallback is **removed**, and should not be
+re-added.
+
+RS is `stock / benchmark`, re-anchored to the window start. Swapping the
+benchmark divides the whole anchored line by `I_t/I_0` of a *different* index —
+which changes every RS number on the page by the same factor on a given day,
+while every value still looks like a perfectly ordinary RS reading. It is the
+same failure mode as §7.16's adjustment drift: numbers that are wrong in a way
+nothing on screen reveals. Worse, the swap depended on a transient network
+result, so two runs minutes apart could disagree with no visible cause.
+
+The replacement behaviour:
+
+- `RS_BENCHMARK = "^CRSLDX"`, retried `INDEX_FETCH_ATTEMPTS` (3) times with a
+  short linear backoff. Retrying is how you make `^CRSLDX` work; substituting a
+  different index is not.
+- Still empty after that, `fetch_nifty_live()` raises with an explicit message.
+- `run_full_scan`'s Phase 2 already caught initialization failures — it logs,
+  pushes the message to the status line and returns no results. So a missing
+  benchmark now surfaces as a stopped scan naming the cause.
+
+**Consequence that had to be fixed with it.** Aborting on a missing benchmark is
+only safe if aborting is non-destructive. `init_scanning_results_table()` was
+being called by the caller *before* the scan (dropping and recreating the results
+table), so an early abort left an empty table plus a `scan_runs` row describing
+the previous run — the View Scan Results button would offer a run whose rows were
+gone. The rebuild moved inside `run_full_scan`, immediately before
+`save_scan_results`, so the table is only replaced once there is something to put
+in it and a failed scan leaves the last good run intact. Verified: with the
+benchmark unreachable, a scan returns `[]` and both the stored rows and their
+`scan_runs` metadata are unchanged.
