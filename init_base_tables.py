@@ -97,6 +97,20 @@ def init_all_tables():
     )
     ''')
 
+    # 6. Scan run log — records what produced the rows currently sitting in
+    #    ath_scanning_results, so the page can label them after a reload.
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS scan_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        finished_at TEXT,
+        universe TEXT,
+        universe_size INTEGER,
+        criterion TEXT,
+        hits INTEGER
+    )
+    ''')
+
     # Create indices
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_data_symbol ON stock_data(symbol)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_stock_data_date ON stock_data(date)')
@@ -107,7 +121,7 @@ def init_all_tables():
     
     print("✅ All base tables created successfully!")
     for name in ('stock_data', 'fund_snapshots', 'scoring_history', 'users',
-                 'scanner_state', 'ath_tracking_table'):
+                 'scanner_state', 'ath_tracking_table', 'scan_runs'):
         print(f"   - {name}")
 
 if __name__ == '__main__':

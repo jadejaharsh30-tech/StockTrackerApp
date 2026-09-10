@@ -16,6 +16,7 @@ python init_base_tables.py      # create/ensure core tables (users, stock_data, 
 python init_alerts_db.py        # create alerts table
 python init_sector_db.py        # create sector_scores / sector_risk_metrics / sector_alerts tables
 python init_profit_history.py   # create profit_history table (ATH profit scan)
+#                                 (init_base_tables also creates scan_runs, the scan log)
 python app.py                   # runs Flask dev server on :5000 (debug=True, use_reloader=False)
 ```
 

@@ -2967,7 +2967,8 @@ def export_sectors_csv():
     )
 
 from scanner_engine import (run_full_scan, get_profit_tracker_tickers, get_scan_results,
-                            init_scanning_results_table, promote_ath_eod, resync_ath_baselines)
+                            init_scanning_results_table, promote_ath_eod, resync_ath_baselines,
+                            run_custom_pipeline, get_last_scan_run, record_scan_run)
 import threading 
 
 # --- ATH SCANNER ROUTES ---
@@ -3327,8 +3328,9 @@ def run_new_scanner():
 
     def task(user_id):
         try:
-            run_full_scan(tickers, user_id=user_id, profit_tolerance_pct=tolerance,
-                          profit_criterion=criterion)
+            results = run_full_scan(tickers, user_id=user_id, profit_tolerance_pct=tolerance,
+                                    profit_criterion=criterion)
+            record_scan_run(user_id, 'tracked', len(tickers), criterion, len(results))
         except Exception as e:
             status_manager.set_status(user_id, False, 0, 0, f"Scan error: {str(e)}")
 
@@ -3367,6 +3369,130 @@ def get_scanner_results():
     """Fetch current scan results from staging table."""
     results = get_scan_results()
     return jsonify(results)
+
+@app.route('/api/scanner/upload-universe', methods=['POST'])
+@login_required
+def upload_scan_universe():
+    """
+    Parse an uploaded Excel/CSV into a list of NSE symbols for a custom scan.
+
+    Nothing is stored server-side — the parsed list goes back to the browser and
+    is posted again with the run request, so there is no half-uploaded state to
+    reconcile if the user never runs the scan.
+    """
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({'success': False, 'error': 'No file uploaded.'})
+
+    try:
+        if file.filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+            df = pd.read_excel(file)
+        else:
+            df = pd.read_csv(file)
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Could not read the file: {e}'})
+
+    if df.empty:
+        return jsonify({'success': False, 'error': 'The file has no rows.'})
+
+    # Prefer a recognisably-named column; otherwise fall back to the first one.
+    cols = {str(c).strip().upper(): c for c in df.columns}
+    preferred = ('SYMBOL', 'NSE CODE', 'NSE_CODE', 'TICKER', 'COMPANY TICKER', 'SCRIP', 'CODE')
+    source = next((cols[name] for name in preferred if name in cols), df.columns[0])
+
+    seen, symbols, dropped = set(), [], 0
+    for raw in df[source].tolist():
+        sym = str(raw).strip().upper().replace('.NS', '')
+        # Tolerate stray blanks and Excel's NaN rows without silently eating typos
+        if not sym or sym in ('NAN', 'NONE', 'SYMBOL'):
+            dropped += 1
+            continue
+        if sym in seen:
+            dropped += 1
+            continue
+        seen.add(sym)
+        symbols.append(sym)
+
+    if not symbols:
+        return jsonify({'success': False,
+                        'error': f"No usable symbols found in column '{source}'."})
+
+    conn = get_db()
+    try:
+        known = {r[0] for r in conn.execute("SELECT DISTINCT symbol FROM profit_tracker")}
+        with_profit = {r[0] for r in conn.execute(
+            "SELECT DISTINCT symbol FROM profit_history")} if conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='profit_history'"
+        ).fetchone() else set()
+    except Exception:
+        known, with_profit = set(), set()
+    finally:
+        conn.close()
+
+    return jsonify({
+        'success': True,
+        'column': str(source),
+        'symbols': symbols,
+        'count': len(symbols),
+        'dropped': dropped,
+        'in_profit_tracker': len(seen & known),
+        'with_profit_history': len(seen & with_profit),
+        'sample': symbols[:12],
+    })
+
+
+@app.route('/api/scanner/run-custom', methods=['POST'])
+@login_required
+def run_custom_scan():
+    """
+    Run the full chain over an uploaded universe: optional profit refresh,
+    optional baseline re-validation, then the ATH scan — in that order.
+    Shares scanner_state, so it cannot overlap a scan or a profit refresh.
+    """
+    current_status = status_manager.get_status(current_user.id)
+    if current_status['running']:
+        return jsonify({'status': 'warning',
+                        'message': 'A scan or refresh is already in progress.'})
+
+    data = request.get_json(silent=True) or {}
+    symbols = [str(s).strip().upper() for s in data.get('symbols', []) if str(s).strip()]
+    if not symbols:
+        return jsonify({'status': 'error', 'message': 'No symbols provided.'})
+
+    criterion = str(data.get('profit_criterion', 'D')).upper()[:1]
+    if criterion not in ('D', 'G'):
+        criterion = 'D'
+    try:
+        tolerance = float(data.get('profit_tolerance', 0) or 0)
+    except (TypeError, ValueError):
+        tolerance = 0.0
+    do_profit = bool(data.get('refresh_profit', False))
+    do_baselines = bool(data.get('refresh_baselines', True))
+
+    def task(user_id):
+        try:
+            run_custom_pipeline(symbols, user_id=user_id,
+                                refresh_profit=do_profit,
+                                refresh_baselines=do_baselines,
+                                profit_criterion=criterion,
+                                profit_tolerance_pct=tolerance)
+        except Exception as e:
+            status_manager.set_status(user_id, False, 0, 100,
+                                      f"Custom scan failed: {e}", force=True)
+
+    thread = threading.Thread(target=task, args=(current_user.id,))
+    thread.daemon = True
+    thread.start()
+    return jsonify({'status': 'success',
+                    'message': f'Custom scan started for {len(symbols)} symbols.'})
+
+
+@app.route('/api/scanner/last-run', methods=['GET'])
+@login_required
+def scanner_last_run():
+    """Metadata describing whatever is currently in ath_scanning_results."""
+    return jsonify({'success': True, 'last_run': get_last_scan_run(current_user.id)})
+
 
 @app.route('/api/scanner/reset', methods=['POST'])
 @login_required

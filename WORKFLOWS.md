@@ -550,3 +550,47 @@ The other §7.13 change is **unaffected and still in place**: short listings are
 measured over whatever aligned history they have (down to `MIN_RS_SESSIONS`,
 20) instead of returning `N/A`, with `rs_window` reported. The two changes are
 independent — one is the fetch parameter, the other is the window slicing.
+
+### 7.15 Custom universe scan, and persistent results
+
+**Custom Scan tab.** A third tab on `/ath-scanner` takes an Excel/CSV of symbols
+and runs the whole chain over that universe instead of `profit_tracker`.
+
+Symbols are read from a `SYMBOL` / `NSE CODE` / `TICKER` / `COMPANY TICKER`
+column when one exists, else the first column; `.NS` suffixes are stripped,
+case and whitespace normalised, blanks and duplicates dropped and counted. The
+parsed list is returned to the browser and posted back with the run request —
+nothing is stored server-side, so an upload the user never runs leaves no state
+to reconcile.
+
+`run_custom_pipeline()` runs the stages in the only correct order:
+
+1. **Profit data** (optional) — universe-independent, so it goes first and the
+   scan's Phase 4 then reads fresh data.
+2. **Baselines** (optional, default on) — *must* precede the scan. The scan's own
+   Phase 1 only seeds symbols it has never seen, so a symbol already carrying a
+   stale baseline would keep it and produce a wrong trigger price. This is the
+   whole reason the custom flow defaults it on: an ad-hoc universe is exactly
+   where stale baselines hide.
+3. **ATH scan** over the universe.
+
+Each stage's progress is rescaled into its own band (verified monotonic for 1,
+2 and 3 stages) so the bar advances once across the run rather than resetting
+per stage, and messages are prefixed `[2/3] Baselines: ...`. The orchestrator
+owns the status line — inner calls get a `progress_callback` but no `user_id`,
+so they don't write competing messages.
+
+It takes `scanner_state` like everything else, so a custom run cannot overlap a
+normal scan or a profit refresh, in either direction.
+
+**Persistent results.** `ath_scanning_results` already survived until the next
+scan overwrote it — only the page forgot, because nothing loaded it on open. Now
+`loadLastScanResults()` runs on `DOMContentLoaded`, and a **View Scan Results**
+button re-displays them on demand.
+
+A new `scan_runs` table records one row per completed scan (when, which
+universe, its size, the profit criterion, the hit count) purely so the page can
+*label* what it is showing: *"Showing the last scan: 2026-09-10 16:32 · custom
+universe of 287 symbols · Req. Profit Dual · 22 hits"*. The banner hides itself
+as soon as a fresh scan renders, since the results are then current rather than
+restored.

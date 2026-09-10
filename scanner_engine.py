@@ -118,6 +118,70 @@ def save_scan_results(results):
         conn.close()
 
 
+def init_scan_runs_table(conn=None):
+    """
+    One row per completed scan. `ath_scanning_results` already survives until the
+    next scan overwrites it, so this only records what produced those rows —
+    when, over which universe, and under which profit criterion — so the page can
+    say what it is showing after a reload.
+    """
+    own = conn is None
+    conn = conn or sqlite3.connect(TRACKER_DB)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scan_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                finished_at TEXT,
+                universe TEXT,
+                universe_size INTEGER,
+                criterion TEXT,
+                hits INTEGER
+            )
+        """)
+        if own:
+            conn.commit()
+    finally:
+        if own:
+            conn.close()
+
+
+def record_scan_run(user_id, universe, universe_size, criterion, hits):
+    conn = sqlite3.connect(TRACKER_DB)
+    try:
+        init_scan_runs_table(conn)
+        conn.execute(
+            """INSERT INTO scan_runs (user_id, finished_at, universe, universe_size, criterion, hits)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+             universe, universe_size, criterion, hits))
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Could not record scan run: {e}")
+    finally:
+        conn.close()
+
+
+def get_last_scan_run(user_id=None):
+    """Metadata for the results currently sitting in ath_scanning_results."""
+    conn = sqlite3.connect(TRACKER_DB)
+    conn.row_factory = sqlite3.Row
+    try:
+        init_scan_runs_table(conn)
+        conn.commit()
+        if user_id:
+            row = conn.execute(
+                "SELECT * FROM scan_runs WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+                (user_id,)).fetchone()
+        else:
+            row = conn.execute("SELECT * FROM scan_runs ORDER BY id DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
 def get_scan_results():
     """Fetch current results from the staging table."""
     conn = sqlite3.connect(TRACKER_DB)
@@ -840,3 +904,90 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
 
     logger.info(f"Scan complete: {len(results)} hits found from {total} tickers.")
     return results
+
+
+# ====================== CUSTOM UNIVERSE PIPELINE ======================
+
+def run_custom_pipeline(tickers, user_id=None, refresh_profit=False, refresh_baselines=True,
+                        profit_criterion='D', profit_tolerance_pct=0.0):
+    """
+    Run the whole chain over an ad-hoc universe, in the only order that is correct:
+
+      1. (optional) refresh profit_history from the APIs — universe-independent,
+         so it goes first and the scan's Phase 4 then reads fresh data.
+      2. (optional) re-validate ATH baselines for THESE tickers. Must precede the
+         scan: the scan's own Phase 1 only seeds symbols it has never seen, so a
+         symbol already carrying a stale baseline would keep it and produce a
+         wrong trigger price.
+      3. Run the ATH scan over the universe.
+
+    Progress from each stage is rescaled into its own band so the bar advances
+    once across the whole run instead of resetting three times.
+    """
+    from scanner_status import ScannerStatusManager
+    status_manager = ScannerStatusManager()
+
+    stages = []
+    if refresh_profit:
+        stages.append('profit')
+    if refresh_baselines:
+        stages.append('baselines')
+    stages.append('scan')
+    n = len(stages)
+
+    def band(i):
+        """(start, end) percentage band for stage index i."""
+        return (100 * i) // n, (100 * (i + 1)) // n
+
+    def say(i, label, pct_within, message):
+        lo, hi = band(i)
+        pct = lo + int((hi - lo) * max(0.0, min(1.0, pct_within)))
+        if user_id:
+            status_manager.set_status(user_id, True, pct, 100,
+                                      f"[{i+1}/{n}] {label}: {message}")
+
+    idx = 0
+    if refresh_profit:
+        from profit_feed import refresh as refresh_profit_data
+        say(idx, 'Profit data', 0.0, 'starting...')
+        try:
+            refresh_profit_data(progress_callback=lambda pct, msg: say(idx, 'Profit data', pct / 100.0, msg))
+        except Exception as e:
+            logger.error(f"Profit refresh failed during custom pipeline: {e}")
+            if user_id:
+                status_manager.set_status(user_id, False, 0, 100,
+                                          f"Profit refresh failed: {e}", force=True)
+            return {'error': f'Profit refresh failed: {e}'}
+        idx += 1
+
+    if refresh_baselines:
+        stage = idx
+        say(stage, 'Baselines', 0.0, f'refreshing {len(tickers)} symbols...')
+        try:
+            resync_ath_baselines(
+                tickers,
+                progress_callback=lambda p, t, m: say(stage, 'Baselines', (p / t) if t else 0, m))
+        except Exception as e:
+            logger.error(f"Baseline refresh failed during custom pipeline: {e}")
+            if user_id:
+                status_manager.set_status(user_id, False, 0, 100,
+                                          f"Baseline refresh failed: {e}", force=True)
+            return {'error': f'Baseline refresh failed: {e}'}
+        idx += 1
+
+    stage = idx
+    say(stage, 'ATH scan', 0.0, f'scanning {len(tickers)} symbols...')
+    init_scanning_results_table()
+    results = run_full_scan(
+        tickers,
+        progress_callback=lambda p, t, m: say(stage, 'ATH scan', (p / t) if t else 0, m),
+        user_id=None,                       # this orchestrator owns the status line
+        profit_tolerance_pct=profit_tolerance_pct,
+        profit_criterion=profit_criterion)
+
+    record_scan_run(user_id, 'custom', len(tickers), profit_criterion, len(results))
+    msg = f"Custom scan complete. {len(results)} ATH hits from {len(tickers)} symbols."
+    if user_id:
+        status_manager.set_status(user_id, False, 100, 100, msg, force=True)
+    logger.info(msg)
+    return {'hits': len(results), 'universe_size': len(tickers)}
