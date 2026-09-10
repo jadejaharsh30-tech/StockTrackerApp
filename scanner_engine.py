@@ -82,6 +82,7 @@ def init_scanning_results_table(scope='tracked'):
             current_rs REAL,
             ath_rs REAL,
             rs_window INTEGER,
+            rs_anchor_date TEXT,
             profit_ttm_ath TEXT,
             profit_qtr_ath TEXT,
             profit_yoy TEXT,
@@ -127,14 +128,14 @@ def save_scan_results(results, scope='tracked'):
         for r in results:
             conn.execute(f"""
                 INSERT INTO {table}
-                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs, rs_window,
+                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs, rs_window, rs_anchor_date,
                  profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points,
                  profit_ttm, profit_peak_fy, profit_meets, profit_criterion, profit_reason,
                  manual_ath_profit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (r['symbol'], r['new_ath_price'], r['trigger_price'],
                   r['green_candle'], r['close_gt_ath'], r['ath_outperformance'],
-                  r.get('current_rs'), r.get('ath_rs'), r.get('rs_window'),
+                  r.get('current_rs'), r.get('ath_rs'), r.get('rs_window'), r.get('rs_anchor_date'),
                   r.get('profit_ttm_ath'), r.get('profit_qtr_ath'), r.get('profit_yoy'),
                   r.get('profit_flag'), r.get('profit_basis'), r.get('profit_points'),
                   r.get('profit_ttm'), r.get('profit_peak_fy'),
@@ -536,6 +537,7 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
             'current_rs': None,
             'ath_rs': None,
             'rs_window': 0,
+            'rs_anchor_date': None,
         }
 
     # Filter to strictly before today for alignment with live candle
@@ -555,6 +557,7 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
         'current_rs': rs_results.get('current_rs'),
         'ath_rs': rs_results.get('ath_rs'),
         'rs_window': rs_results.get('rs_window', 0),
+        'rs_anchor_date': rs_results.get('rs_anchor_date'),
     }
 
 
@@ -607,7 +610,7 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
 
         if len(aligned) < MIN_RS_SESSIONS:
             return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
-                    'rs_window': len(aligned)}
+                    'rs_window': len(aligned), 'rs_anchor_date': None}
 
         # Raw ratio
         aligned['RS_Raw'] = aligned['Stock'] / aligned['Index']
@@ -615,11 +618,21 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
         # Window = last LOOKBACK rows, or the whole series when it is shorter
         window = aligned.iloc[-LOOKBACK:]
 
-        # Anchor value from start of window
+        # Anchor value from start of window.
+        #
+        # The anchor DATE is reported alongside the numbers because it is the one
+        # thing that can be checked directly against the chart. LOOKBACK is a row
+        # count over the INNER-JOINED series, so a session missing from the index
+        # drops out and the window reaches one stock-bar further back than the
+        # row count suggests. Whether 211 rows lands on the indicator's 212-bar
+        # anchor therefore depends on how many sessions ^CRSLDX is missing — it
+        # cannot be settled on paper. Hover that date on the chart and count.
         anchor_rs_raw = window['RS_Raw'].iloc[0]
+        anchor_date = window.index[0]
+        anchor_str = anchor_date.strftime('%Y-%m-%d') if hasattr(anchor_date, 'strftime') else str(anchor_date)
         if anchor_rs_raw == 0:
             return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
-                    'rs_window': len(window)}
+                    'rs_window': len(window), 'rs_anchor_date': anchor_str}
 
         # Anchored line for full window
         anchored_line = (window['RS_Raw'] / anchor_rs_raw) * 100
@@ -637,12 +650,13 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
             'current_rs': round(current_anchored, 2),
             'ath_rs': round(max_anchored, 2),
             'rs_window': len(window),
+            'rs_anchor_date': anchor_str,
         }
 
     except Exception as e:
         logger.error(f"RS calculation error: {e}")
         return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
-                'rs_window': 0}
+                'rs_window': 0, 'rs_anchor_date': None}
 
 
 # ====================== MAIN SCAN ORCHESTRATOR ======================

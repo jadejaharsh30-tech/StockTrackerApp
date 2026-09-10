@@ -809,3 +809,39 @@ it passes.
 
 The remaining departures from the Pine source are unchanged: green candle `>=`
 vs `>`, the 0.01% verdict slack, and inner-join vs forward-filled alignment.
+
+### 7.20 Why the 211-vs-213 question cannot be settled on paper
+
+§7.18's arithmetic — 211 rows puts the anchor 210 bars back, the indicator uses
+212 — is correct **only if the stock and the index share every session**. They
+may not.
+
+`calculate_rs_outperformance` inner-joins the two series, so any session present
+on the stock but missing from Yahoo's `^CRSLDX` is dropped from the window
+entirely. Pine has no such step: `request.security` forward-fills the comparison
+symbol onto the stock's own bars, so its bar count is the stock's bar count.
+A row count over a gappy join therefore reaches further back than it looks:
+
+| Sessions missing from the index | Anchor lands, in STOCK bars |
+|---|---|
+| 0 | 210 back |
+| 1 | 211 back |
+| **2** | **212 back — exactly the indicator's anchor** |
+| 3 | 213 back |
+
+So `LOOKBACK = 211` is right *if* `^CRSLDX` is missing about two sessions per
+window, and `213` is right if it is missing none. Both are defensible from the
+code alone. This is why §7.18 was reverted rather than defended: it proved a
+premise, not a conclusion.
+
+**The measurement that decides it** is `rs_anchor_date`, now returned by
+`calculate_rs_outperformance`, stored on every results row and shown in the RS
+column's tooltip ("Anchored at YYYY-MM-DD = 100"). Hover that date on the
+TradingView chart and count bars back to the latest one:
+
+- **212 bars** → the current window is correct, leave it alone.
+- **210 bars** → the index series has no gaps and `LOOKBACK` should be 213.
+
+Do it on a **full-history** stock during **live market hours**. A short listing
+anchors on its own first bar, where a one-bar difference moves everything, and a
+post-market run cannot distinguish a window error from a stale after-hours bar.

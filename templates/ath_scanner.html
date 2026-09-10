@@ -797,12 +797,20 @@
     // Keep in step with scanner_engine.LOOKBACK.
     const RS_FULL_WINDOW = 211;
 
+    // The anchor DATE is the one value that can be checked straight against a
+    // TradingView chart: hover that date on the chart and count bars back to it.
+    // The window is a row count over the stock/index inner join, so sessions
+    // missing from the index shift the anchor further back than the count
+    // suggests — the date settles where it actually landed, the count cannot.
     function rsTitle(row) {
         const w = row.rs_window;
         if (!w) return 'Not enough aligned history against Nifty 500 to measure relative strength.';
-        return w < RS_FULL_WINDOW
+        const base = w < RS_FULL_WINDOW
             ? `Measured over ${w} sessions (short listing history — full window is ${RS_FULL_WINDOW}).`
             : `Measured over the full ${w}-session window.`;
+        return row.rs_anchor_date
+            ? `${base} Anchored at ${row.rs_anchor_date} = 100 — check that date on the chart.`
+            : base;
     }
 
     function rsCell(value, row) {
