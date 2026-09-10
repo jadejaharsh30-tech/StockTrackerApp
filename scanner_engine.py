@@ -19,9 +19,22 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TRACKER_DB = os.path.join(BASE_DIR, 'tracker.db')
+# Honour DATABASE_PATH like app.py/daily_tasks.py/scanner_status.py do — without
+# this the scanner writes to a different database than the routes read from.
+TRACKER_DB = os.environ.get('DATABASE_PATH', os.path.join(BASE_DIR, 'tracker.db'))
 LOOKBACK = 211
+# A short-listed stock still has a relative-strength history over its own life.
+# Below this many aligned sessions the anchored line is too short to mean
+# anything, so the verdict stays N/A; between here and LOOKBACK we use whatever
+# history exists and report the window length alongside the numbers.
+MIN_RS_SESSIONS = 20
 BATCH_SIZE = 50
+
+# Progress is split across phases so the bar keeps moving through the slow
+# in-depth work instead of pinning at 100% once price download finishes.
+PHASE2_SHARE = 0.75   # batch price download
+PHASE3_SHARE = 0.20   # RS / green-candle analysis of hits
+# remaining 0.05 = phase 4 profit classification
 
 
 # ====================== DATABASE HELPERS ======================
@@ -41,6 +54,19 @@ def init_scanning_results_table():
             ath_outperformance TEXT,
             current_rs REAL,
             ath_rs REAL,
+            rs_window INTEGER,
+            profit_ttm_ath TEXT,
+            profit_qtr_ath TEXT,
+            profit_yoy TEXT,
+            profit_flag TEXT,
+            profit_basis TEXT,
+            profit_points INTEGER,
+            profit_ttm REAL,
+            profit_peak_fy REAL,
+            profit_meets TEXT,
+            profit_criterion TEXT,
+            profit_reason TEXT,
+            manual_ath_profit TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -72,12 +98,20 @@ def save_scan_results(results):
         conn.execute("DELETE FROM ath_scanning_results")
         for r in results:
             conn.execute("""
-                INSERT INTO ath_scanning_results 
-                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO ath_scanning_results
+                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs, rs_window,
+                 profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points,
+                 profit_ttm, profit_peak_fy, profit_meets, profit_criterion, profit_reason,
+                 manual_ath_profit)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (r['symbol'], r['new_ath_price'], r['trigger_price'],
                   r['green_candle'], r['close_gt_ath'], r['ath_outperformance'],
-                  r.get('current_rs'), r.get('ath_rs')))
+                  r.get('current_rs'), r.get('ath_rs'), r.get('rs_window'),
+                  r.get('profit_ttm_ath'), r.get('profit_qtr_ath'), r.get('profit_yoy'),
+                  r.get('profit_flag'), r.get('profit_basis'), r.get('profit_points'),
+                  r.get('profit_ttm'), r.get('profit_peak_fy'),
+                  r.get('profit_meets'), r.get('profit_criterion'), r.get('profit_reason'),
+                  r.get('manual_ath_profit')))
         conn.commit()
         logger.info(f"Saved {len(results)} scan results to staging table.")
     finally:
@@ -175,14 +209,25 @@ def sync_new_stocks_to_ath_tracker(tickers, progress_callback=None):
     conn = sqlite3.connect(TRACKER_DB)
     try:
         existing = set(r[0] for r in conn.execute("SELECT symbol FROM ath_tracking_table").fetchall())
+        # A baseline of 0/NULL is a failed earlier sync, not a real lifetime high.
+        # Left alone it passes the `high >= previous_ath` filter forever and
+        # reports a bogus hit with a trigger price of 0 on every scan, so retry
+        # those alongside genuinely new tickers.
+        broken = set(r[0] for r in conn.execute(
+            "SELECT symbol FROM ath_tracking_table WHERE previous_ath IS NULL OR previous_ath <= 0"
+        ).fetchall())
     finally:
         conn.close()
 
-    new_tickers = [t for t in tickers if t not in existing]
+    new_tickers = [t for t in tickers if t not in existing or t in broken]
 
     if not new_tickers:
         logger.info("No new stocks to sync.")
         return
+
+    retrying = len([t for t in new_tickers if t in broken])
+    if retrying:
+        logger.info(f"Retrying {retrying} symbols with a missing/zero baseline.")
 
     logger.info(f"Syncing {len(new_tickers)} new stocks into ATH tracker...")
     if progress_callback:
@@ -237,9 +282,18 @@ def sync_new_stocks_to_ath_tracker(tickers, progress_callback=None):
     conn = sqlite3.connect(TRACKER_DB)
     try:
         for symbol, ath_price in new_entries:
+            # Insert new symbols; for existing rows only fill in a baseline that
+            # is still missing/zero. A good baseline is never overwritten here —
+            # promotion of a real new high is the EOD promote step's job.
             conn.execute("""
-                INSERT OR IGNORE INTO ath_tracking_table (symbol, previous_ath, exchange, last_updated)
+                INSERT INTO ath_tracking_table (symbol, previous_ath, exchange, last_updated)
                 VALUES (?, ?, 'NSE', ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    previous_ath = excluded.previous_ath,
+                    last_updated = excluded.last_updated
+                WHERE (ath_tracking_table.previous_ath IS NULL
+                       OR ath_tracking_table.previous_ath <= 0)
+                  AND excluded.previous_ath > 0
             """, (symbol, ath_price, time.time()))
         conn.commit()
         logger.info(f"Synced {len(new_entries)} new stocks into ATH tracker.")
@@ -279,7 +333,9 @@ def fetch_ticker_history_for_rs(symbol):
     """
     try:
         yf_sym = f"{symbol}.NS"
-        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=False)
+        # auto_adjust=True: the index series is adjusted, so the stock must be too,
+        # otherwise every split puts a false cliff in the ratio.
+        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=True)
         
         if data.empty:
             return None
@@ -342,7 +398,8 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
             'close_gt_ath': close_gt_ath,
             'ath_outperformance': 'N/A',
             'current_rs': None,
-            'ath_rs': None
+            'ath_rs': None,
+            'rs_window': 0,
         }
 
     # Filter to strictly before today for alignment with live candle
@@ -360,14 +417,26 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
         'close_gt_ath': close_gt_ath,
         'ath_outperformance': rs_results['is_outperforming'],
         'current_rs': rs_results.get('current_rs'),
-        'ath_rs': rs_results.get('ath_rs')
+        'ath_rs': rs_results.get('ath_rs'),
+        'rs_window': rs_results.get('rs_window', 0),
     }
 
 
 def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_series):
     """
-    Calculate ATH Outperformance using Rolling Fixed Anchor RS.
-    Uses a 211-day lookback window.
+    ATH Outperformance via a fixed-anchor relative-strength line.
+
+    Preferred window is LOOKBACK sessions. A recently-listed stock has fewer,
+    but its RS over its own listed life is still a real measurement, so the
+    window shrinks to whatever history exists rather than refusing a verdict.
+    Below MIN_RS_SESSIONS it stays N/A. The window actually used is returned as
+    rs_window so a short-history reading is visibly weaker than a full one.
+
+    NOTE the stock history must be split-adjusted (auto_adjust=True) to match
+    the index series. Unadjusted prices put a cliff in the ratio at every split,
+    and since the anchor sits at the window start, everything after the split
+    reads as a collapse — e.g. a 1:4 split showed current_rs at a quarter of
+    ath_rs while the stock had done nothing wrong.
     """
     try:
         # Build full close series (history + today live)
@@ -380,19 +449,21 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
             'Index': nifty_series,
         }).dropna()
 
-        if len(aligned) < LOOKBACK:
-            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None}
+        if len(aligned) < MIN_RS_SESSIONS:
+            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
+                    'rs_window': len(aligned)}
 
         # Raw ratio
         aligned['RS_Raw'] = aligned['Stock'] / aligned['Index']
 
-        # Window = last LOOKBACK rows
+        # Window = last LOOKBACK rows, or the whole series when it is shorter
         window = aligned.iloc[-LOOKBACK:]
 
         # Anchor value from start of window
         anchor_rs_raw = window['RS_Raw'].iloc[0]
         if anchor_rs_raw == 0:
-            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None}
+            return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
+                    'rs_window': len(window)}
 
         # Anchored line for full window
         anchored_line = (window['RS_Raw'] / anchor_rs_raw) * 100
@@ -408,24 +479,179 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
         return {
             'is_outperforming': is_op,
             'current_rs': round(current_anchored, 2),
-            'ath_rs': round(max_anchored, 2)
+            'ath_rs': round(max_anchored, 2),
+            'rs_window': len(window),
         }
 
     except Exception as e:
         logger.error(f"RS calculation error: {e}")
-        return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None}
+        return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
+                'rs_window': 0}
 
 
 # ====================== MAIN SCAN ORCHESTRATOR ======================
 
-def run_full_scan(tickers, progress_callback=None, user_id=None):
+def resync_ath_baselines(tickers, progress_callback=None, user_id=None, only_broken=False):
+    """
+    Recompute previous_ath from full history for tickers already in the tracker.
+
+    Phase 1 of a normal scan only seeds symbols it has never seen, so a baseline
+    that was wrong at seed time stays wrong forever. This is the periodic
+    re-validation the (broken) legacy 'weekend refresh' was meant to provide.
+
+    Unlike the legacy scanner it does NOT promote today's high: the lifetime max
+    is computed excluding today's candle, so the EOD-promote discipline that the
+    rest of the workflow depends on is preserved.
+
+    only_broken=True limits the work to rows whose baseline is missing or <= 0.
+    """
+    from scanner_status import ScannerStatusManager
+    status_manager = ScannerStatusManager()
+
+    def update(progress, total, message, running=True):
+        if progress_callback:
+            progress_callback(progress, total, message)
+        if user_id:
+            status_manager.set_status(user_id, running, progress, total, message)
+
+    conn = sqlite3.connect(TRACKER_DB)
+    try:
+        if only_broken:
+            targets = [r[0] for r in conn.execute(
+                "SELECT symbol FROM ath_tracking_table "
+                "WHERE previous_ath IS NULL OR previous_ath <= 0").fetchall()]
+        else:
+            targets = list(tickers)
+    finally:
+        conn.close()
+
+    total = len(targets)
+    if not total:
+        update(0, 0, "No baselines needed refreshing.", running=False)
+        return {'checked': 0, 'updated': 0, 'failed': []}
+
+    updated, failed = 0, []
+    batches = [targets[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
+    today = pd.Timestamp.now().normalize()
+
+    for i, batch in enumerate(batches):
+        update(i * BATCH_SIZE, total, f"Refreshing baselines {i+1}/{len(batches)}...")
+        try:
+            data = yf.download([f"{s}.NS" for s in batch], period="max",
+                               interval="1d", auto_adjust=False, progress=False)
+        except Exception as e:
+            logger.error(f"Baseline refresh batch failed: {e}")
+            failed.extend(batch)
+            continue
+        if data.empty:
+            failed.extend(batch)
+            continue
+
+        conn = sqlite3.connect(TRACKER_DB)
+        try:
+            for symbol in batch:
+                yf_sym = f"{symbol}.NS"
+                try:
+                    if isinstance(data.columns, pd.MultiIndex):
+                        if yf_sym not in data.columns.get_level_values(1):
+                            failed.append(symbol)
+                            continue
+                        highs = data['High'][yf_sym].dropna()
+                    else:
+                        highs = data['High'].dropna()
+                    hist = highs[highs.index.normalize() < today]
+                    if hist.empty:
+                        failed.append(symbol)
+                        continue
+                    lifetime = float(hist.max())
+                    if lifetime <= 0:
+                        failed.append(symbol)
+                        continue
+                    conn.execute(
+                        """UPDATE ath_tracking_table
+                           SET previous_ath = ?, last_updated = ?
+                           WHERE symbol = ?""",
+                        (lifetime, time.time(), symbol))
+                    updated += 1
+                except Exception:
+                    failed.append(symbol)
+            conn.commit()
+        finally:
+            conn.close()
+
+    msg = f"Baseline refresh complete. {updated} updated"
+    if failed:
+        msg += f", {len(failed)} unresolved (likely renamed/delisted)"
+    update(total, total, msg + ".", running=False)
+    logger.info(msg)
+    return {'checked': total, 'updated': updated, 'failed': failed}
+
+
+def annotate_profit_flags(results, tolerance_pct=0.0, user_id=None, criterion='D'):
+    """
+    Phase 4: attach Dual/Growth profit classification to each scan result.
+
+    Reads reported profit history from the local `profit_history` table (see
+    profit_scanner.py) and, for comparison, the user's existing manual
+    `profit_tracker.ath_profit` flag. Never overwrites the manual flag — the
+    UI surfaces both and lets the user apply the computed value per stock.
+    """
+    from profit_scanner import classify_many, meets_criterion
+
+    symbols = [r['symbol'] for r in results]
+    verdicts = classify_many(symbols, tolerance_pct=tolerance_pct)
+
+    # Pull the user's current manual flags so the UI can show computed vs manual
+    manual = {}
+    try:
+        conn = sqlite3.connect(TRACKER_DB)
+        if user_id:
+            rows = conn.execute(
+                "SELECT symbol, ath_profit FROM profit_tracker WHERE user_id = ?",
+                (user_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT symbol, ath_profit FROM profit_tracker").fetchall()
+        manual = {r[0]: r[1] for r in rows}
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Could not read manual ath_profit flags: {e}")
+
+    classified = 0
+    for r in results:
+        v = verdicts.get(r['symbol'], {})
+        r['profit_ttm_ath'] = v.get('profit_ttm_ath', 'N/A')
+        r['profit_qtr_ath'] = v.get('profit_qtr_ath', 'N/A')
+        r['profit_yoy'] = v.get('profit_yoy', 'N/A')
+        r['profit_flag'] = v.get('profit_flag', 'N/A')
+        r['profit_basis'] = v.get('profit_basis')
+        r['profit_points'] = v.get('profit_points', 0)
+        r['profit_ttm'] = v.get('profit_ttm')
+        r['profit_peak_fy'] = v.get('profit_peak_fy')
+        # Does it satisfy the criterion the user picked before this scan?
+        r['profit_meets'] = meets_criterion(v, criterion) if v else 'N/A'
+        r['profit_criterion'] = criterion
+        r['profit_reason'] = v.get('profit_reason')
+        r['manual_ath_profit'] = manual.get(r['symbol'])
+        if r['profit_meets'] == 'Y':
+            classified += 1
+
+    label = 'Dual' if criterion == 'D' else 'Growth (incl. Dual)'
+    logger.info(f"Profit classification: {classified}/{len(results)} meet {label}.")
+    return results
+
+
+def run_full_scan(tickers, progress_callback=None, user_id=None, profit_tolerance_pct=0.0,
+                  profit_criterion='D'):
     """
     Run the optimized full ATH scan using batch processing.
-    
+
     Args:
         tickers: List of bare ticker symbols (no .NS)
         progress_callback: Optional fn(progress, total, message) for UI updates
         user_id: Optional user_id to persist status in DB
+        profit_tolerance_pct: Slack (%) allowed below the profit peak when
+            judging "at ATH" (0 = must equal or exceed the peak)
     """
     from scanner_status import ScannerStatusManager
     status_manager = ScannerStatusManager()
@@ -472,9 +698,10 @@ def run_full_scan(tickers, progress_callback=None, user_id=None):
     batches = [tickers[i:i + BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
     
     potential_hits = {}  # symbol -> live_candle_dict
+    unresolved = []      # symbols with no usable baseline
 
     for i, batch in enumerate(batches):
-        processed_count = i * BATCH_SIZE
+        processed_count = int(i * BATCH_SIZE * PHASE2_SHARE)
         update_status(processed_count, total, f"Batch {i+1}/{len(batches)}: Downloading prices...")
 
         # Add .NS suffix for batch download
@@ -510,7 +737,15 @@ def run_full_scan(tickers, progress_callback=None, user_id=None):
 
                     # Fast Filter: Compare against previous_ath from ath_tracking_table
                     current_ath = ath_map.get(symbol, 0.0)
-                    
+
+                    # No usable baseline (sync failed — typically a renamed or
+                    # delisted ticker). Any price beats 0, so without this guard
+                    # the symbol is reported as an ATH hit with trigger price 0
+                    # on every single scan.
+                    if current_ath <= 0:
+                        unresolved.append(symbol)
+                        continue
+
                     if round(live_high, 2) >= round(current_ath, 2):
                         potential_hits[symbol] = {
                             'High': live_high,
@@ -525,14 +760,22 @@ def run_full_scan(tickers, progress_callback=None, user_id=None):
 
     # ── Phase 3: In-depth 4-strategy analysis for potential hits ──
     total_hits = len(potential_hits)
-    update_status(total, total, f"Detected {total_hits} potential hits. Analyzing (Batch Fetching History)...")
+    phase3_base = int(total * PHASE2_SHARE)
+    if unresolved:
+        logger.warning(
+            f"{len(unresolved)} symbols skipped — no usable ATH baseline "
+            f"(likely renamed/delisted): {', '.join(unresolved[:10])}"
+        )
+    update_status(phase3_base, total,
+                  f"Detected {total_hits} potential hits. Analyzing (Batch Fetching History)...")
 
     if total_hits > 0:
         # Batch Fetch 1y history for all hits to avoid 1-by-1 overhead
         hit_symbols = list(potential_hits.keys())
         yf_hit_symbols = [f"{s}.NS" for s in hit_symbols]
         try:
-            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=False, progress=False)
+            # auto_adjust=True to match the index series — see calculate_rs_outperformance.
+            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=True, progress=False)
         except Exception as e:
             logger.error(f"Batch history fetch failed: {e}")
             hist_data = pd.DataFrame()
@@ -540,7 +783,9 @@ def run_full_scan(tickers, progress_callback=None, user_id=None):
         for i, symbol in enumerate(hit_symbols):
             try:
                 live_candle = potential_hits[symbol]
-                update_status(total, total, f"Analyzing {symbol} ({i+1}/{total_hits})")
+                update_status(
+                    phase3_base + int(total * PHASE3_SHARE * (i + 1) / max(total_hits, 1)),
+                    total, f"Analyzing {symbol} ({i+1}/{total_hits})")
                 
                 # Extract history for this specific ticker from the batch
                 history_closes = None
@@ -565,7 +810,19 @@ def run_full_scan(tickers, progress_callback=None, user_id=None):
             except Exception as e:
                 logger.error(f"Analysis failed for {symbol}: {e}")
     else:
-        update_status(total, total, "No potential hits detected.")
+        update_status(phase3_base, total, "No potential hits detected.")
+
+    # ── Phase 4: Profit ATH classification (Dual / Growth) ──
+    # Runs only over confirmed hits, and reads the local profit_history table,
+    # so it costs no network calls regardless of universe size.
+    if results:
+        update_status(int(total * (PHASE2_SHARE + PHASE3_SHARE)), total,
+                      f"Classifying profit history for {len(results)} hits...")
+        try:
+            annotate_profit_flags(results, tolerance_pct=profit_tolerance_pct,
+                                  user_id=user_id, criterion=profit_criterion)
+        except Exception as e:
+            logger.error(f"Profit classification failed: {e}")
 
     # Save to staging table
     save_scan_results(results)
