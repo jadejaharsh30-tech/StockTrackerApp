@@ -250,6 +250,47 @@
         border-bottom-color: var(--primary-color);
     }
 
+    /* Collapsible reference block. Native <details>, so it works with no JS and
+       stays keyboard-accessible; the arrow is drawn on ::after because the
+       default marker can't be styled consistently across browsers. */
+    .help-toggle {
+        max-width: 780px;
+        margin: 0 0 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--card-bg);
+    }
+
+    .help-toggle > summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 9px 13px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--primary-color);
+        user-select: none;
+        border-radius: 8px;
+    }
+
+    .help-toggle > summary::-webkit-details-marker { display: none; }
+    .help-toggle > summary::after { content: ' ▾'; opacity: 0.6; }
+    .help-toggle[open] > summary::after { content: ' ▴'; }
+
+    .help-toggle > summary:hover { background: var(--hover-bg); }
+
+    .help-toggle[open] > summary {
+        border-bottom: 1px solid var(--border-color);
+        border-radius: 8px 8px 0 0;
+    }
+
+    .help-toggle ul {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        line-height: 1.7;
+        margin: 10px 0;
+        padding-right: 14px;
+    }
+
     .tab-content {
         display: none;
         animation: fadeIn 0.2s ease-out;
@@ -459,27 +500,32 @@
     <div class="results-section" style="padding: 20px;">
         <h3 style="margin-top:0;">Scan a custom universe</h3>
         <p style="color: var(--text-muted); font-size:0.9rem; max-width: 780px;">
-            Upload an Excel (<code>.xlsx</code>, <code>.xlsm</code>, <code>.xls</code>) or
-            <code>.csv</code> containing the stocks you want to scan, then run the whole chain in
-            one go. Only one column is used and everything else is ignored, so an existing
-            watchlist export usually works as-is.
+            Upload an Excel or CSV of the stocks you want to scan, then run the whole chain in one
+            go. Only one column is read and everything else is ignored, so an existing watchlist
+            export usually works as-is.
         </p>
-        <ul style="color: var(--text-muted); font-size:0.9rem; max-width: 780px; line-height:1.7;">
-            <li><b>Header row:</b> row 1 must be the header. A column named
-                <code>SYMBOL</code>, <code>NSE CODE</code>, <code>NSE_CODE</code>,
-                <code>TICKER</code>, <code>COMPANY TICKER</code>, <code>SCRIP</code> or
-                <code>CODE</code> is used if present (case and surrounding spaces don't matter).
-                With none of those, the <b>first column</b> is used — so a plain single-column
-                list works too.</li>
-            <li><b>Values:</b> NSE symbols as they appear on the exchange, e.g.
-                <code>TCS</code>, <code>SBIN</code>, <code>CHENNPETRO</code>. A trailing
-                <code>.NS</code> is stripped, case and stray spaces are normalised, and blanks
-                and duplicates are dropped. <b>BSE-only codes will not resolve</b> — the scanner
-                is NSE-first.</li>
-            <li><b>Nothing else is required:</b> no prices, no dates, no ordering. After loading
-                you get the symbol count, which column was used, and how many already have profit
-                history — check that before running.</li>
-        </ul>
+
+        <details class="help-toggle">
+            <summary>&#9432;&nbsp; What the file should look like</summary>
+            <ul>
+                <li><b>File type:</b> <code>.xlsx</code>, <code>.xlsm</code>, <code>.xls</code>
+                    or <code>.csv</code>.</li>
+                <li><b>Header row:</b> row 1 must be the header. A column named
+                    <code>SYMBOL</code>, <code>NSE CODE</code>, <code>NSE_CODE</code>,
+                    <code>TICKER</code>, <code>COMPANY TICKER</code>, <code>SCRIP</code> or
+                    <code>CODE</code> is used if present (case and surrounding spaces don't
+                    matter). With none of those, the <b>first column</b> is used — so a plain
+                    single-column list works too.</li>
+                <li><b>Values:</b> NSE symbols as they appear on the exchange, e.g.
+                    <code>TCS</code>, <code>SBIN</code>, <code>CHENNPETRO</code>. A trailing
+                    <code>.NS</code> is stripped, case and stray spaces are normalised, and blanks
+                    and duplicates are dropped. <b>BSE-only codes will not resolve</b> — the
+                    scanner is NSE-first.</li>
+                <li><b>Nothing else is required:</b> no prices, no dates, no ordering. After
+                    loading you get the symbol count, which column was used, and how many already
+                    have profit history — check that before running.</li>
+            </ul>
+        </details>
 
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin: 16px 0;">
             <input type="file" id="universeFile" accept=".xlsx,.xlsm,.xls,.csv"
