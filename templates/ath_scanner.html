@@ -250,6 +250,47 @@
         border-bottom-color: var(--primary-color);
     }
 
+    /* Collapsible reference block. Native <details>, so it works with no JS and
+       stays keyboard-accessible; the arrow is drawn on ::after because the
+       default marker can't be styled consistently across browsers. */
+    .help-toggle {
+        max-width: 780px;
+        margin: 0 0 14px;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--card-bg);
+    }
+
+    .help-toggle > summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 9px 13px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--primary-color);
+        user-select: none;
+        border-radius: 8px;
+    }
+
+    .help-toggle > summary::-webkit-details-marker { display: none; }
+    .help-toggle > summary::after { content: ' ▾'; opacity: 0.6; }
+    .help-toggle[open] > summary::after { content: ' ▴'; }
+
+    .help-toggle > summary:hover { background: var(--hover-bg); }
+
+    .help-toggle[open] > summary {
+        border-bottom: 1px solid var(--border-color);
+        border-radius: 8px 8px 0 0;
+    }
+
+    .help-toggle ul {
+        color: var(--text-muted);
+        font-size: 0.9rem;
+        line-height: 1.7;
+        margin: 10px 0;
+        padding-right: 14px;
+    }
+
     .tab-content {
         display: none;
         animation: fadeIn 0.2s ease-out;
@@ -336,13 +377,13 @@
 
 <div class="tab-container">
     <button class="tab-btn active" onclick="openTab('scanner')">Scanner View</button>
+    <button class="tab-btn" onclick="openTab('custom')">Custom Scan 📄</button>
     <button class="tab-btn" onclick="openTab('database')">Manage Database 📂</button>
 </div>
 
-<!-- TAB 1: SCANNER -->
-<div id="tab-scanner" class="tab-content active">
-
-    <!-- Progress Bar (Moved to Top for better visibility and space) -->
+<!-- Progress bar sits OUTSIDE the tab panels: a custom-universe run is driven
+     from the Custom Scan tab but reports through this same bar, so it has to be
+     visible whichever tab the user is on. -->
     <div id="progressContainer"
         style="display:none; margin-bottom: 12px; background: var(--card-bg); padding: 8px 12px; border-radius: 12px; border: 1px solid var(--border-color);">
         <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
@@ -356,6 +397,9 @@
             </div>
         </div>
     </div>
+
+<!-- TAB 1: SCANNER -->
+<div id="tab-scanner" class="tab-content active">
 
     <div class="scanner-controls" style="margin-bottom: 12px; padding: 10px 12px; gap: 12px;">
         <div style="display: flex; gap: 6px; align-items: center;" title="Slack allowed below the profit peak when judging &quot;at ATH&quot;. 0 = must equal or exceed the all-time peak.">
@@ -402,6 +446,12 @@
                 EOD Sync 🌅
             </button>
 
+            <button class="scanner-btn btn-refresh" id="btnViewResults" onclick="loadLastScanResults('tracked', true)"
+                style="padding: 6px 12px; font-size: 0.85rem;"
+                title="Load the stored results of the most recent tracked-universe scan. They are kept until the next tracked scan replaces them, so this works after a page reload or a restart.">
+                View Scan Results 📋<span id="viewResultsWhen" style="opacity:.7; font-weight:400;"></span>
+            </button>
+
             <button class="scanner-btn btn-refresh" id="btnResetScanner" onclick="resetScanner()"
                 style="padding: 6px 12px; font-size: 0.85rem;"
                 title="Clear a stuck 'scan already in progress' state. Use this if a scan crashed or the server restarted mid-scan. Does not touch any of your data.">
@@ -414,18 +464,22 @@
         </div>
     </div>
 
+    <div id="lastRunBanner" style="display:none; margin-bottom:10px; padding:8px 14px;
+         border-radius:8px; background: var(--hover-bg); border:1px solid var(--border-color);
+         font-size:0.85rem; color: var(--text-muted);"></div>
+
     <!-- Scanner Results Section -->
     <div class="results-section">
         <div class="results-header" style="padding: 10px 16px;">
             <span style="font-weight: 600; font-size: 0.95rem;">New ATH Hits Today</span>
             <div style="display: flex; gap: 12px; align-items: center;">
                 <span class="results-count" id="selectedCount" style="font-size: 0.8rem;"></span>
-                <button class="scanner-btn btn-refresh" id="btnApplyProfit" onclick="applyProfitFlags()"
+                <button class="scanner-btn btn-refresh" id="btnApplyProfit" onclick="applyProfitFlags('tracked')"
                     style="display: none; padding: 6px 12px; font-size: 0.85rem;"
                     title="Overwrite the manual ATH Profit flag in Profit Manager with the computed verdict for the selected stocks">
                     📌 Apply Profit Flag
                 </button>
-                <button class="btn-bulk-add" id="btnBulkAdd" onclick="bulkAddSelected()"
+                <button class="btn-bulk-add" id="btnBulkAdd" onclick="bulkAddSelected('tracked')"
                     style="display: none; padding: 6px 16px; font-size: 0.85rem;">
                     ➕ Add Selected
                 </button>
@@ -433,13 +487,134 @@
         </div>
         <div id="resultsArea"
             style="min-height: 80px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.9rem;">
-            No scan run yet. Click "Run ATH Scan" to start.
+            Nothing loaded. Click "Run ATH Scan" to scan, or "View Scan Results" to load the last one.
         </div>
     </div>
 </div>
 <!-- END TAB 1 -->
 
 <!-- TAB 2: DATABASE MANAGEMENT -->
+
+<!-- ============ CUSTOM SCAN TAB ============ -->
+<div id="tab-custom" class="tab-content">
+    <div class="results-section" style="padding: 20px;">
+        <h3 style="margin-top:0;">Scan a custom universe</h3>
+        <p style="color: var(--text-muted); font-size:0.9rem; max-width: 780px;">
+            Upload an Excel or CSV of the stocks you want to scan, then run the whole chain in one
+            go. Only one column is read and everything else is ignored, so an existing watchlist
+            export usually works as-is.
+        </p>
+
+        <details class="help-toggle">
+            <summary>&#9432;&nbsp; What the file should look like</summary>
+            <ul>
+                <li><b>File type:</b> <code>.xlsx</code>, <code>.xlsm</code>, <code>.xls</code>
+                    or <code>.csv</code>.</li>
+                <li><b>Header row:</b> row 1 must be the header. A column named
+                    <code>SYMBOL</code>, <code>NSE CODE</code>, <code>NSE_CODE</code>,
+                    <code>TICKER</code>, <code>COMPANY TICKER</code>, <code>SCRIP</code> or
+                    <code>CODE</code> is used if present (case and surrounding spaces don't
+                    matter). With none of those, the <b>first column</b> is used — so a plain
+                    single-column list works too.</li>
+                <li><b>Values:</b> NSE symbols as they appear on the exchange, e.g.
+                    <code>TCS</code>, <code>SBIN</code>, <code>CHENNPETRO</code>. A trailing
+                    <code>.NS</code> is stripped, case and stray spaces are normalised, and blanks
+                    and duplicates are dropped. <b>BSE-only codes will not resolve</b> — the
+                    scanner is NSE-first.</li>
+                <li><b>Nothing else is required:</b> no prices, no dates, no ordering. After
+                    loading you get the symbol count, which column was used, and how many already
+                    have profit history — check that before running.</li>
+            </ul>
+        </details>
+
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin: 16px 0;">
+            <input type="file" id="universeFile" accept=".xlsx,.xlsm,.xls,.csv"
+                style="padding:8px; border:1px solid var(--border-color); border-radius:8px;
+                       background: var(--bg-color); color: var(--text-color);">
+            <button class="scanner-btn btn-refresh" onclick="uploadUniverse()" style="padding:8px 14px;">
+                Load Universe
+            </button>
+        </div>
+
+        <div id="universeSummary" style="display:none; padding:12px 14px; border-radius:8px;
+             background: var(--hover-bg); border:1px solid var(--border-color); margin-bottom:16px;
+             font-size:0.9rem;"></div>
+
+        <div id="customOptions" style="display:none;">
+            <div style="display:flex; gap:22px; align-items:center; flex-wrap:wrap; margin-bottom:14px;">
+                <label style="display:flex; gap:7px; align-items:center; font-size:0.9rem;"
+                    title="Re-download full history and recompute each symbol's lifetime high. Needed when the universe contains symbols whose stored baseline is stale — the scan's own sync only seeds symbols it has never seen.">
+                    <input type="checkbox" id="optBaselines" checked class="select-checkbox">
+                    Refresh baselines first <span style="color:var(--text-muted);">(recommended)</span>
+                </label>
+                <label style="display:flex; gap:7px; align-items:center; font-size:0.9rem;"
+                    title="Pull fresh profit data from the two Google Sheets APIs before scanning. Universe-independent — it refreshes all ~5500 companies, so skip it if you already refreshed today.">
+                    <input type="checkbox" id="optProfit" class="select-checkbox">
+                    Refresh profit data first
+                </label>
+                <label style="display:flex; gap:7px; align-items:center; font-size:0.9rem;">
+                    Req. Profit:
+                    <select id="customReqProfit"
+                        style="padding:4px 6px; font-size:0.85rem; border:1px solid var(--border-color);
+                               border-radius:4px; background: var(--card-bg); color: var(--text-color);">
+                        <option value="D" selected>Dual</option>
+                        <option value="G">Growth (incl. Dual)</option>
+                    </select>
+                </label>
+            </div>
+            <button class="scanner-btn btn-run-daily" id="btnRunCustom" onclick="runCustomScan()"
+                style="padding: 10px 18px;">
+                <span class="spinner" id="spinCustom"></span>
+                Run Full Pipeline ⚡
+            </button>
+            <div style="color: var(--text-muted); font-size:0.85rem; margin-top:10px;">
+                Runs in order: profit data (if ticked) &rarr; baselines (if ticked) &rarr; ATH scan.
+                Results appear below and are stored separately from the Scanner View results, so
+                neither run overwrites the other. This cannot run while another scan or refresh is
+                in progress.
+            </div>
+        </div>
+
+        <div id="customStatus"
+            style="margin-top:14px; font-weight:500; font-family: monospace; font-size:0.8rem;
+                   color: var(--text-muted);"></div>
+    </div>
+
+    <!-- Custom-universe results. Same columns as Scanner View, backed by its own
+         table (ath_scanning_results_custom) and its own stored run. -->
+    <div class="results-section" style="margin-top:18px;">
+        <div class="results-header" style="padding: 10px 16px;">
+            <span style="font-weight: 600; font-size: 0.95rem;">Custom Universe ATH Hits</span>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <span class="results-count" id="selectedCountCustom" style="font-size: 0.8rem;"></span>
+                <button class="scanner-btn btn-refresh" id="btnViewResultsCustom"
+                    onclick="loadLastScanResults('custom', true)"
+                    style="padding: 6px 12px; font-size: 0.85rem;"
+                    title="Load the stored results of the most recent custom-universe scan. They are kept until the next custom scan replaces them.">
+                    View Scan Results 📋<span id="viewResultsWhenCustom" style="opacity:.7; font-weight:400;"></span>
+                </button>
+                <button class="scanner-btn btn-refresh" id="btnApplyProfitCustom"
+                    onclick="applyProfitFlags('custom')"
+                    style="display: none; padding: 6px 12px; font-size: 0.85rem;"
+                    title="Overwrite the manual ATH Profit flag in Profit Manager with the computed verdict for the selected stocks">
+                    📌 Apply Profit Flag
+                </button>
+                <button class="btn-bulk-add" id="btnBulkAddCustom" onclick="bulkAddSelected('custom')"
+                    style="display: none; padding: 6px 16px; font-size: 0.85rem;">
+                    ➕ Add Selected
+                </button>
+            </div>
+        </div>
+        <div id="lastRunBannerCustom" style="display:none; margin: 10px 16px 0; padding:8px 14px;
+             border-radius:8px; background: var(--hover-bg); border:1px solid var(--border-color);
+             font-size:0.85rem; color: var(--text-muted);"></div>
+        <div id="resultsAreaCustom"
+            style="min-height: 80px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.9rem;">
+            Nothing loaded. Run a custom scan, or click "View Scan Results" to load the last one.
+        </div>
+    </div>
+</div>
+
 <div id="tab-database" class="tab-content">
     <div class="card" style="padding: 20px;">
         <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
@@ -481,6 +656,7 @@
         const spinner = document.getElementById('spinNewScan');
         const status = document.getElementById('statusText');
 
+        activeScanScope = 'tracked';
         btn.disabled = true;
         spinner.style.display = 'inline-block';
         status.innerText = "Starting 4-strategy scan...";
@@ -585,44 +761,102 @@
 
             if (!data.running) {
                 clearInterval(scannerPollInterval);
+                const scope = activeScanScope;
+
                 document.getElementById('btnNewScan').disabled = false;
                 document.getElementById('spinNewScan').style.display = 'none';
-                document.getElementById('statusText').innerText = "Scan Complete ✅";
+                const cBtn = document.getElementById('btnRunCustom');
+                if (cBtn) cBtn.disabled = false;
+                const cSpin = document.getElementById('spinCustom');
+                if (cSpin) cSpin.style.display = 'none';
+
+                setScopeStatus(scope, data.message || 'Scan Complete ✅');
                 document.getElementById('progressBar').style.background = 'var(--primary-color)';
 
-                // Render results
-                if (data.results && data.results.length > 0) {
-                    renderScannerResults(data.results);
+                // These rows ARE this scan's output, so the "showing a stored run"
+                // banner does not apply. The button label is restamped instead.
+                const lb = scopeEl(scope, 'banner');
+                if (lb) lb.style.display = 'none';
+                refreshLastRunLabel(scope);
+
+                const dbRes = await fetch(`/api/scanner/results?scope=${scope}`);
+                const dbData = await dbRes.json();
+                if (dbData.length > 0) {
+                    renderScannerResults(dbData, scope);
                 } else {
-                    // Fallback: fetch from DB
-                    const dbRes = await fetch('/api/scanner/results');
-                    const dbData = await dbRes.json();
-                    if (dbData.length > 0) {
-                        renderScannerResults(dbData);
-                    } else {
-                        document.getElementById('resultsArea').innerHTML =
-                            '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No new ATH hits found in this scan.</div>';
-                    }
+                    scanRows[scope] = [];
+                    scopeEl(scope, 'area').innerHTML =
+                        '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No new ATH hits found in this scan.</div>';
+                    scopeEl(scope, 'bulk').style.display = 'none';
+                    scopeEl(scope, 'apply').style.display = 'none';
                 }
             }
         } catch (e) { /* pass */ }
     }
 
-    // Full unfiltered result set from the last scan; the Req. Profit dropdown
-    // filters this view-side without re-scanning.
-    let lastScanResults = [];
+    // ====================== SCAN SCOPES ======================
+    // Two independent result sets, each with its own storage table, its own tab
+    // and its own DOM. Every function that touches rows takes a scope so the two
+    // tables can coexist without their selections or buttons colliding.
+    const SCOPE_IDS = {
+        tracked: {
+            area: 'resultsArea', count: 'selectedCount', bulk: 'btnBulkAdd',
+            apply: 'btnApplyProfit', banner: 'lastRunBanner',
+            when: 'viewResultsWhen', status: 'statusText', label: 'tracked universe'
+        },
+        custom: {
+            area: 'resultsAreaCustom', count: 'selectedCountCustom', bulk: 'btnBulkAddCustom',
+            apply: 'btnApplyProfitCustom', banner: 'lastRunBannerCustom',
+            when: 'viewResultsWhenCustom', status: 'customStatus', label: 'custom universe'
+        }
+    };
+
+    // Full unfiltered result set per scope, held so the table can be re-rendered
+    // (e.g. after applying a flag) without re-scanning.
+    const scanRows = { tracked: [], custom: [] };
+
+    // Which scope the scan currently in flight belongs to, so the poller renders
+    // its results into the right tab.
+    let activeScanScope = 'tracked';
+
+    const el = id => document.getElementById(id);
+    const scopeEl = (scope, key) => el(SCOPE_IDS[scope][key]);
+
+    // Selection lives inside a scope's own results area, never document-wide —
+    // both tables carry .row-check and a global query would mix them.
+    function scopeChecks(scope, selector) {
+        const area = scopeEl(scope, 'area');
+        return area ? Array.from(area.querySelectorAll(selector)) : [];
+    }
+
+    function setScopeStatus(scope, text) {
+        const node = scopeEl(scope, 'status');
+        if (node) node.innerText = text;
+    }
 
     // RS is measured over whatever aligned history a stock has, up to 211
     // sessions. A recent listing gets a shorter window rather than no verdict,
-    // so mark it so a short reading isn't mistaken for a full one.
+    // so mark it so a short reading isn't mistaken for a full one. The
+    // indicator does the same thing (it anchors at the first bar when the
+    // listing is shorter than its lookback), so a starred row is still
+    // comparable to the chart.
+    // Keep in step with scanner_engine.LOOKBACK.
     const RS_FULL_WINDOW = 211;
 
+    // The anchor DATE is the one value that can be checked straight against a
+    // TradingView chart: hover that date on the chart and count bars back to it.
+    // The window is a row count over the stock/index inner join, so sessions
+    // missing from the index shift the anchor further back than the count
+    // suggests — the date settles where it actually landed, the count cannot.
     function rsTitle(row) {
         const w = row.rs_window;
         if (!w) return 'Not enough aligned history against Nifty 500 to measure relative strength.';
-        return w < RS_FULL_WINDOW
+        const base = w < RS_FULL_WINDOW
             ? `Measured over ${w} sessions (short listing history — full window is ${RS_FULL_WINDOW}).`
             : `Measured over the full ${w}-session window.`;
+        return row.rs_anchor_date
+            ? `${base} Anchored at ${row.rs_anchor_date} = 100 — check that date on the chart.`
+            : base;
     }
 
     function rsCell(value, row) {
@@ -687,65 +921,65 @@
     }
 
     // ====================== APPLY COMPUTED PROFIT FLAG ======================
-    async function applyProfitFlags() {
-        const checked = document.querySelectorAll('.row-check:checked');
+    async function applyProfitFlags(scope) {
+        scope = scope || 'tracked';
+        const checked = scopeChecks(scope, '.row-check:checked');
         if (checked.length === 0) {
             alert('Select the stocks whose computed profit verdict you want to apply.');
             return;
         }
-        const symbols = Array.from(checked).map(b => b.dataset.symbol);
+        const symbols = checked.map(b => b.dataset.symbol);
         if (!confirm(
             `Overwrite the manual "ATH Profit" flag in Profit Manager for ${symbols.length} stock(s)?\n\n` +
             `The flag is set from the strict DUAL test (quarter AND TTM both at ATH) — ` +
             `Growth-only stocks are set to N, even if this scan required Growth.\n\n` +
             `This changes your dashboard's FUND/PROP category and GO/WAIT output for these stocks.`)) return;
 
-        const status = document.getElementById('statusText');
-        status.innerText = 'Applying profit flags...';
+        setScopeStatus(scope, 'Applying profit flags...');
         try {
             const res = await fetch('/api/profit/apply-flag', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ symbols })
+                body: JSON.stringify({ symbols, scope })
             });
             const data = await res.json();
-            if (!data.success) { status.innerText = '⚠️ ' + (data.error || 'Failed'); return; }
+            if (!data.success) { setScopeStatus(scope, '⚠️ ' + (data.error || 'Failed')); return; }
 
             let msg = `✅ Updated ${data.updated_count} stock(s).`;
             if (data.skipped && data.skipped.length) msg += ` Skipped ${data.skipped.length} with no verdict.`;
             if (data.not_in_profit_tracker && data.not_in_profit_tracker.length) {
                 msg += ` ${data.not_in_profit_tracker.length} not in Profit Manager.`;
             }
-            status.innerText = msg;
+            setScopeStatus(scope, msg);
 
             // Reflect the new manual values in the table without a re-scan
             (data.updated || []).forEach(u => {
-                const row = lastScanResults.find(r => r.symbol === u.symbol);
+                const row = (scanRows[scope] || []).find(r => r.symbol === u.symbol);
                 if (row) row.manual_ath_profit = u.ath_profit;
             });
-            renderScannerResults();
+            renderScannerResults(null, scope);
         } catch (e) {
-            status.innerText = 'Network error applying profit flags.';
+            setScopeStatus(scope, 'Network error applying profit flags.');
         }
     }
 
-    function renderScannerResults(results) {
-        const area = document.getElementById('resultsArea');
+    function renderScannerResults(results, scope) {
+        scope = scope || 'tracked';
+        const area = scopeEl(scope, 'area');
 
-        // Called with data after a scan; called bare when the filter changes.
-        if (results) lastScanResults = results;
-        const allResults = lastScanResults || [];
+        // Called with data after a scan; called bare to re-render in place.
+        if (results) scanRows[scope] = results;
+        const results_ = scanRows[scope] || [];
 
         area.innerHTML = '';
         area.style.display = 'block';
 
-        if (allResults.length === 0) {
+        if (results_.length === 0) {
             area.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No new ATH hits found.</div>';
-            document.getElementById('btnBulkAdd').style.display = 'none';
+            scopeEl(scope, 'bulk').style.display = 'none';
+            scopeEl(scope, 'apply').style.display = 'none';
             return;
         }
-
-        const results_ = allResults;
 
         const wrapper = document.createElement('div');
         wrapper.style.maxHeight = '850px';
@@ -753,11 +987,11 @@
 
         const table = document.createElement('table');
         table.className = 'results-table';
-        table.id = 'scannerResultsTable';
+        table.id = scope === 'custom' ? 'scannerResultsTableCustom' : 'scannerResultsTable';
         table.innerHTML = `
             <thead>
                 <tr>
-                    <th style="width: 40px;"><input type="checkbox" class="select-checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+                    <th style="width: 40px;"><input type="checkbox" class="select-checkbox" onchange="toggleSelectAll(this, '${scope}')"></th>
                     <th>Symbol</th>
                     <th>New ATH Price</th>
                     <th>Trigger Price</th>
@@ -779,7 +1013,7 @@
             const tr = document.createElement('tr');
             tr.dataset.symbol = row.symbol;
             tr.innerHTML = `
-                <td><input type="checkbox" class="select-checkbox row-check" data-symbol="${row.symbol}" onchange="updateSelectedCount()"></td>
+                <td><input type="checkbox" class="select-checkbox row-check" data-symbol="${row.symbol}" onchange="updateSelectedCount('${scope}')"></td>
                 <td><b>${row.symbol}</b></td>
                 <td style="color: var(--primary-color); font-weight: 700;">${Number(row.new_ath_price).toFixed(2)}</td>
                 <td>${Number(row.trigger_price).toFixed(2)}</td>
@@ -799,28 +1033,31 @@
         area.appendChild(wrapper);
 
         // Show bulk-add + apply-profit buttons
-        document.getElementById('btnBulkAdd').style.display = 'flex';
-        document.getElementById('btnApplyProfit').style.display = 'flex';
-        updateSelectedCount();
+        scopeEl(scope, 'bulk').style.display = 'flex';
+        scopeEl(scope, 'apply').style.display = 'flex';
+        updateSelectedCount(scope);
     }
 
-    function toggleSelectAll(master) {
-        document.querySelectorAll('.row-check').forEach(cb => {
+    function toggleSelectAll(master, scope) {
+        scopeChecks(scope || 'tracked', '.row-check').forEach(cb => {
             cb.checked = master.checked;
         });
-        updateSelectedCount();
+        updateSelectedCount(scope);
     }
 
-    function updateSelectedCount() {
-        const checked = document.querySelectorAll('.row-check:checked').length;
-        const total = document.querySelectorAll('.row-check').length;
-        const countEl = document.getElementById('selectedCount');
-        countEl.textContent = checked > 0 ? `${checked} of ${total} selected` : `${total} stocks found`;
+    function updateSelectedCount(scope) {
+        scope = scope || 'tracked';
+        const checked = scopeChecks(scope, '.row-check:checked').length;
+        const total = scopeChecks(scope, '.row-check').length;
+        const countEl = scopeEl(scope, 'count');
+        if (countEl) countEl.textContent =
+            checked > 0 ? `${checked} of ${total} selected` : `${total} stocks found`;
     }
 
     // ====================== BULK ADD ======================
-    async function bulkAddSelected() {
-        const checkedBoxes = document.querySelectorAll('.row-check:checked');
+    async function bulkAddSelected(scope) {
+        scope = scope || 'tracked';
+        const checkedBoxes = scopeChecks(scope, '.row-check:checked');
         if (checkedBoxes.length === 0) {
             showToast('No stocks selected. Check the boxes first.', 'warning');
             return;
@@ -841,7 +1078,7 @@
         }
         // ---------------------------------
 
-        const btn = document.getElementById('btnBulkAdd');
+        const btn = scopeEl(scope, 'bulk');
         btn.disabled = true;
         btn.innerHTML = '⏳ Adding...';
 
@@ -875,7 +1112,7 @@
             if (result.success) {
                 // Remove successfully added rows from DOM
                 result.added.forEach(symbol => {
-                    const row = document.querySelector(`tr[data-symbol="${symbol}"]`);
+                    const row = scopeEl(scope, 'area').querySelector(`tr[data-symbol="${symbol}"]`);
                     if (row) {
                         row.style.transition = 'all 0.3s ease';
                         row.style.opacity = '0';
@@ -894,7 +1131,7 @@
                 }
 
                 // Update count after animation
-                setTimeout(updateSelectedCount, 400);
+                setTimeout(() => updateSelectedCount(scope), 400);
             } else {
                 showToast('❌ Error: ' + (result.error || 'Failed to add stocks.'), 'error');
             }
@@ -976,6 +1213,168 @@
         html += '</tbody></table>';
         area.innerHTML = html;
     }
+
+
+    // ====================== CUSTOM UNIVERSE SCAN ======================
+    let customUniverse = [];
+
+    async function uploadUniverse() {
+        const input = document.getElementById('universeFile');
+        const box = document.getElementById('universeSummary');
+        if (!input.files || !input.files[0]) { alert('Choose a file first.'); return; }
+
+        const fd = new FormData();
+        fd.append('file', input.files[0]);
+        box.style.display = 'block';
+        box.innerHTML = 'Reading file...';
+
+        try {
+            const res = await fetch('/api/scanner/upload-universe', { method: 'POST', body: fd });
+            const d = await res.json();
+            if (!d.success) {
+                box.innerHTML = `<b style="color: var(--danger-color);">${d.error}</b>`;
+                document.getElementById('customOptions').style.display = 'none';
+                customUniverse = [];
+                return;
+            }
+            customUniverse = d.symbols;
+            box.innerHTML =
+                `<b>${d.count} symbols</b> read from column <code>${d.column}</code>` +
+                (d.dropped ? ` &nbsp;<span style="color:var(--text-muted);">(${d.dropped} blank/duplicate rows skipped)</span>` : '') +
+                `<br><span style="color:var(--text-muted);">` +
+                `${d.in_profit_tracker} already in your Profit Manager &middot; ` +
+                `${d.with_profit_history} have profit history loaded` +
+                (d.with_profit_history < d.count
+                    ? ` &mdash; the rest will show <i>Not at ATH</i> for profit` : '') +
+                `</span><br><span style="color:var(--text-muted); font-size:0.85rem;">` +
+                `${d.sample.join(', ')}${d.count > d.sample.length ? ', ...' : ''}</span>`;
+            document.getElementById('customOptions').style.display = 'block';
+        } catch (e) {
+            box.innerHTML = '<b style="color: var(--danger-color);">Upload failed.</b>';
+        }
+    }
+
+    async function runCustomScan() {
+        if (!customUniverse.length) { alert('Load a universe first.'); return; }
+        const doProfit = document.getElementById('optProfit').checked;
+        const doBase = document.getElementById('optBaselines').checked;
+
+        let warn = `Run the full pipeline over ${customUniverse.length} symbols?\n\n`;
+        if (doProfit) warn += '  1. Refresh profit data from the APIs\n';
+        if (doBase)   warn += `  ${doProfit ? 2 : 1}. Refresh ATH baselines for these symbols\n`;
+        warn += `  ${1 + (doProfit ? 1 : 0) + (doBase ? 1 : 0)}. Run the ATH scan\n\n`;
+        warn += 'This replaces the previous CUSTOM scan results only — your Scanner View '
+             +  'results are kept. It may take several minutes.';
+        if (!confirm(warn)) return;
+
+        const btn = document.getElementById('btnRunCustom');
+        const spin = document.getElementById('spinCustom');
+        activeScanScope = 'custom';
+        btn.disabled = true; spin.style.display = 'inline-block';
+
+        document.getElementById('progressContainer').style.display = 'block';
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressBar').style.background = 'linear-gradient(90deg, #10b981, #059669)';
+        setScopeStatus('custom', 'Starting custom pipeline...');
+
+        try {
+            const res = await fetch('/api/scanner/run-custom', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    symbols: customUniverse,
+                    refresh_profit: doProfit,
+                    refresh_baselines: doBase,
+                    profit_criterion: document.getElementById('customReqProfit').value,
+                    profit_tolerance: parseFloat((document.getElementById('profitTolerance') || {}).value) || 0
+                })
+            });
+            const d = await res.json();
+            if (d.status !== 'success') {
+                setScopeStatus('custom', '⚠️ ' + d.message);
+                btn.disabled = false; spin.style.display = 'none';
+                return;
+            }
+            scannerPollInterval = setInterval(pollScannerStatus, 1500);
+        } catch (e) {
+            setScopeStatus('custom', 'Network error starting custom scan.');
+            btn.disabled = false; spin.style.display = 'none';
+        }
+    }
+
+    // ====================== PERSISTED RESULTS ======================
+    // Each scope's results table survives until the next scan of that same scope
+    // overwrites it. The page deliberately does NOT show them on load: a stale
+    // table sitting under today's date reads as today's scan. On load we fetch
+    // only the metadata, to stamp the button with WHEN the stored run happened,
+    // and the rows are fetched when the user actually asks for them.
+
+    // '2026-09-10 16:32:05' -> '10 Sep, 16:32'. Falls back to the raw string so a
+    // format change degrades to something readable rather than 'Invalid Date'.
+    function formatRunTime(ts) {
+        if (!ts) return '';
+        const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(ts);
+        if (!m) return ts;
+        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        return `${Number(m[3])} ${months[Number(m[2]) - 1]}, ${m[4]}:${m[5]}`;
+    }
+
+    function describeRun(meta, rowCount) {
+        if (!meta) return `Showing stored results from the last scan (${rowCount} hits).`;
+        return `Showing the scan of <b>${formatRunTime(meta.finished_at)}</b> &middot; ` +
+               `${meta.universe === 'custom' ? 'custom universe' : 'tracked universe'} ` +
+               `of ${meta.universe_size} symbols &middot; Req. Profit ` +
+               `${meta.criterion === 'G' ? 'Growth' : 'Dual'} &middot; ${meta.hits} hits`;
+    }
+
+    // Metadata only — no rows. Stamps the View Scan Results button with the time
+    // of the stored run so the user knows what is waiting before clicking.
+    async function refreshLastRunLabel(scope) {
+        const when = scopeEl(scope, 'when');
+        if (!when) return null;
+        try {
+            const res = await fetch(`/api/scanner/last-run?scope=${scope}`);
+            const meta = (await res.json()).last_run;
+            when.textContent = meta ? ` · ${formatRunTime(meta.finished_at)}` : '';
+            const btn = when.parentElement;
+            if (btn) btn.disabled = !meta;
+            return meta;
+        } catch (e) {
+            when.textContent = '';
+            return null;
+        }
+    }
+
+    async function loadLastScanResults(scope, announce) {
+        scope = scope || 'tracked';
+        try {
+            const [rRes, rMeta] = await Promise.all([
+                fetch(`/api/scanner/results?scope=${scope}`),
+                fetch(`/api/scanner/last-run?scope=${scope}`)
+            ]);
+            const rows = await rRes.json();
+            const meta = (await rMeta.json()).last_run;
+
+            if (!rows || rows.length === 0) {
+                if (announce) setScopeStatus(scope,
+                    `No stored ${SCOPE_IDS[scope].label} results — run a scan first.`);
+                return;
+            }
+            renderScannerResults(rows, scope);
+            const banner = scopeEl(scope, 'banner');
+            if (banner) {
+                banner.style.display = 'block';
+                banner.innerHTML = describeRun(meta, rows.length);
+            }
+        } catch (e) {
+            if (announce) setScopeStatus(scope, 'Could not load stored results.');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        refreshLastRunLabel('tracked');
+        refreshLastRunLabel('custom');
+    });
 
     // ====================== REFRESH PROFIT DATA ======================
     // Refresh profit_history from the two APIs, then show what that would change
@@ -1164,8 +1563,9 @@
         document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
         document.getElementById(`tab-${tabName}`).classList.add('active');
         const btns = document.querySelectorAll('.tab-btn');
-        if (tabName === 'scanner') btns[0].classList.add('active');
-        else btns[1].classList.add('active');
+        const order = { scanner: 0, custom: 1, database: 2 };
+        const active = btns[order[tabName] ?? 0];
+        if (active) active.classList.add('active');
         if (tabName === 'database') loadDatabase();
     }
 

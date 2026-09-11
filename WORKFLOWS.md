@@ -105,7 +105,7 @@ The most complex subsystem, and it has **two live implementations wired into the
 - **`scanner_engine.py`** (current/primary, imported at `app.py:2970`) — a 3-phase batch design:
   1. **Sync**: any `profit_tracker` symbol missing from `ath_tracking_table` gets a full `yf.download(period="max")` to seed its lifetime-high baseline (`previous_ath`).
   2. **Fast batch detect**: 50-ticker batches, 5-day history, flags "potential hits" where today's high ≥ stored `previous_ath`.
-  3. **In-depth analysis** (only for hits): Green Candle (`close ≥ prev_close`), Close > ATH (`close > previous_ath`), and RS Outperformance — a 211-day "rolling fixed-anchor RS" against Nifty 500 (`^CRSLDX`, falling back to `^NSEI`): anchor the stock/index close ratio at the start of the window, and flag `Y` if today's anchored ratio is within 0.01% of the window's max.
+  3. **In-depth analysis** (only for hits): Green Candle (`close ≥ prev_close`), Close > ATH (`close > previous_ath`), and RS Outperformance — a 211-day "rolling fixed-anchor RS" against Nifty 500 (`^CRSLDX`, no fallback index — see §7.17): anchor the stock/index close ratio at the start of the window, and flag `Y` if today's anchored ratio is within 0.01% of the window's max.
   Results land in `ath_scanning_results` (wiped/rebuilt each run) and `ath_tracking_table.today_ath`.
 - **`ath_scanner.py`** (`ATHScanner` class, still imported and instantiated at `app.py:2988`/`3013`, driving `/api/ath/run-daily` and `/api/ath/run-refresh`) — an older single-strategy, non-batched ATH-break detector, explicitly labeled `LEGACY SCANNER` in the template JS/button IDs. **It is wired to live buttons but non-functional**: it reads and writes an `ath_price` column that does not exist in the current `ath_tracking_table` schema (the column is `previous_ath`), so both its scan methods raise `OperationalError: no such column: ath_price`. See §6 for the full defect list.
 
@@ -223,14 +223,14 @@ SELECT symbol FROM ath_tracking_table WHERE previous_ath = 0 OR previous_ath IS 
 
 ### 7.3 The RS-outperformance calculation (the one genuinely subtle formula)
 
-"ATH Outperformance" is *not* a simple return comparison. `calculate_rs_outperformance` builds a **rolling fixed-anchor relative-strength line** over `LOOKBACK = 211` sessions:
+"ATH Outperformance" is *not* a simple return comparison. `calculate_rs_outperformance` builds a **rolling fixed-anchor relative-strength line** anchored `RS_BARS_BACK = 212` bars before the latest bar (`LOOKBACK = 213` rows — see §7.18):
 
 1. Append today's live close to the fetched history, inner-join against the Nifty 500 series (`^CRSLDX`, fallback `^NSEI`) so holidays drop out.
 2. `RS_Raw = Stock_Close / Index_Close` per session.
-3. Take the last 211 rows; **re-anchor** to the first row of that window: `anchored = RS_Raw / RS_Raw[0] * 100`.
+3. Take the last 213 rows; **re-anchor** to the first row of that window: `anchored = RS_Raw / RS_Raw[0] * 100`.
 4. Flag `Y` if `current_anchored >= max_anchored * 0.9999`.
 
-So the question it answers is *"is the stock's ratio-to-benchmark at its own 211-session high right now?"* — an ATH in **relative** terms, mirroring the price ATH. The `0.9999` factor is a float-equality tolerance, not a real tolerance band (≈0.01%).
+So the question it answers is *"is the stock's ratio-to-benchmark at its own 213-session high right now?"* — an ATH in **relative** terms, mirroring the price ATH. The `0.9999` factor is a float-equality tolerance, not a real tolerance band (≈0.01%).
 
 Constraint to know: it needs 211 *aligned* rows but `run_full_scan` only fetches `period="1y"` (~245 sessions). Any symbol with a shorter listing history, or enough missing sessions to drop the join below 211 rows, silently returns `'N/A'` rather than `Y`/`N`. Since ATH outperformance is the hard gate in `get_investment_category`, **`N/A` behaves as a rejection downstream** (it isn't `'Y'`).
 
@@ -529,3 +529,319 @@ to whatever history exists, down to `MIN_RS_SESSIONS` (20) below which it stays
 `N/A`. The window used is stored as `rs_window` and rendered with a `*` and a
 tooltip, so a 60-session reading is visibly weaker than a full 211-session one
 rather than looking identical.
+
+### 7.14 RS split adjustment: reverted, deliberately
+
+§7.13 changed the RS history fetch to `auto_adjust=True` to remove the split
+cliff. **That has been reverted at the user's request** — the fetch is
+`auto_adjust=False` again.
+
+The tradeoff, decided knowingly: adjusting fixes the handful of stocks that
+split inside the window, but it also folds dividends into the series and so
+shifts RS for *every* stock. The user prefers stable numbers across the whole
+universe and handles the few split-affected names manually, which is also
+consistent with `previous_ath` baselines being maintained in raw prices.
+
+So the behaviour described in §7.13 — a 1:4 split showing `current_rs` at
+roughly a quarter of `ath_rs`, and ATH O.P. reading `N` — **is expected**, not a
+bug to re-fix. `calculate_rs_outperformance` carries a docstring saying so.
+
+The other §7.13 change is **unaffected and still in place**: short listings are
+measured over whatever aligned history they have (down to `MIN_RS_SESSIONS`,
+20) instead of returning `N/A`, with `rs_window` reported. The two changes are
+independent — one is the fetch parameter, the other is the window slicing.
+
+### 7.15 Custom universe scan, and persistent results
+
+**Custom Scan tab.** A third tab on `/ath-scanner` takes an Excel/CSV of symbols
+and runs the whole chain over that universe instead of `profit_tracker`.
+
+Symbols are read from the first column whose header matches `SYMBOL`, `NSE CODE`,
+`NSE_CODE`, `TICKER`, `COMPANY TICKER`, `SCRIP` or `CODE` (compared upper-cased
+and stripped), else the first column outright; `.NS` suffixes are stripped, case
+and whitespace normalised, blanks and duplicates dropped and counted. The parsed
+list is returned to the browser and posted back with the run request — nothing is
+stored server-side, so an upload the user never runs leaves no state to
+reconcile. `sample_universe.xlsx` in the repo root is a valid messy example
+(symbol column not first, mixed case, a `.NS` suffix, a duplicate, blank rows).
+
+`run_custom_pipeline()` runs the stages in the only correct order:
+
+1. **Profit data** (optional) — universe-independent, so it goes first and the
+   scan's Phase 4 then reads fresh data.
+2. **Baselines** (optional, default on) — *must* precede the scan. The scan's own
+   Phase 1 only seeds symbols it has never seen, so a symbol already carrying a
+   stale baseline would keep it and produce a wrong trigger price. This is the
+   whole reason the custom flow defaults it on: an ad-hoc universe is exactly
+   where stale baselines hide.
+3. **ATH scan** over the universe.
+
+Each stage's progress is rescaled into its own band (verified monotonic for 1,
+2 and 3 stages) so the bar advances once across the run rather than resetting
+per stage, and messages are prefixed `[2/3] Baselines: ...`. The orchestrator
+owns the status line — inner calls get a `progress_callback` but no `user_id`,
+so they don't write competing messages.
+
+It takes `scanner_state` like everything else, so a custom run cannot overlap a
+normal scan or a profit refresh, in either direction.
+
+**Two result sets, side by side.** The tracked scan and the custom scan keep
+their hits in **separate tables**, so neither run destroys the other's output:
+
+| Scope | Table | Written by |
+|---|---|---|
+| `tracked` | `ath_scanning_results` | Run ATH Scan (Scanner View tab) |
+| `custom` | `ath_scanning_results_custom` | Run Full Pipeline (Custom Scan tab) |
+
+`RESULTS_TABLES` maps scope → table and `_results_table()` resolves it, falling
+back to `tracked` for anything unrecognised so a stale client can never address a
+table that does not exist. `init_scanning_results_table`, `save_scan_results`,
+`get_scan_results` and `run_full_scan` all take `scope=`; `/api/scanner/results`
+and `/api/scanner/last-run` take `?scope=`, and `/api/profit/apply-flag` takes it
+in the body so applying from the custom tab reads the custom scan's verdicts. A
+symbol present in one scope but not the other comes back *skipped*, never
+mis-flagged from the wrong table.
+
+`scan_runs` needed no migration for this: its `universe` column already stored
+`'tracked'` / `'custom'`, so it doubles as the scope key and
+`get_last_scan_run(user_id, scope)` just filters on it.
+
+The two scopes are also independent in the DOM. `SCOPE_IDS` maps each scope to
+its own results area, counter, banner and buttons, and every selection query is
+rooted at that area rather than `document` — both tables carry `.row-check`, so a
+document-wide query would silently mix them.
+
+**Persistent results are shown on request, never on load.** Each scope's table
+survives until the next scan of *that* scope overwrites it, but the page
+deliberately does **not** render stored rows on open: a stale table sitting under
+today's date reads as today's scan. On `DOMContentLoaded` only the metadata is
+fetched, which stamps the **View Scan Results** button with the stored run's time
+(*"View Scan Results 📋 · 10 Sep, 16:32"*) and disables it when there is nothing
+stored. The rows load when the user actually clicks.
+
+`scan_runs` records one row per completed scan (when, which universe, its size,
+the profit criterion, the hit count) so the banner can label what is displayed:
+*"Showing the scan of **10 Sep, 16:32** · custom universe of 287 symbols · Req.
+Profit Dual · 22 hits"*. The banner hides as soon as a fresh scan renders, since
+those results are current rather than restored.
+
+### 7.16 Why the hosted app disagreed with the local one (RS only)
+
+Symptom: the same scan, the same day, the same 9 hits, identical prices and
+identical Y/N verdicts — but different `CURR RS` / `ATH RS` numbers on
+PythonAnywhere. Local matched TradingView; hosted did not.
+
+**Cause: a dividend adjustment, from a commit that never reached `main`.**
+`31007c6` reverted the RS fetch to `auto_adjust=False`, but `main` was at
+`afebb02`, which merged only up to `9016a4e` — the commit that had set
+`auto_adjust=True`. Local ran the branch; PythonAnywhere deploys from `main`.
+
+The signature is unmistakable once you look at the ratios. RS is anchored at the
+window start, so `RS(t) = (S_t/S_0) / (I_t/I_0) × 100`. Adjusted prices back-adjust
+history *downward* by dividends, which shrinks `S_0` and inflates every RS value
+by exactly the window's cumulative dividend factor — a constant per stock, and
+zero for a stock that paid nothing:
+
+| Symbol | Local (raw) | Hosted (adjusted) | Ratio | Pays a dividend? |
+|---|---|---|---|---|
+| CHENNPETRO | 177.04 | 186.23 | 1.0519 | yes, high yield |
+| REDINGTON | 160.80 | 164.33 | 1.0220 | yes |
+| INDIAGLYCO | 33.08 | 33.37 | 1.0088 | yes, small |
+| WELCORP | 302.33 | 303.33 | 1.0033 | yes, small |
+| **LENSKART** | 176.82 | 176.82 | **1.0000** | **no — recent listing** |
+| **STLTECH** | 751.66 | 751.66 | **1.0000** | **no — suspended** |
+
+Both zero-dividend stocks match exactly. Nothing else in the pipeline produces
+that pattern, which is what rules out the other candidates (a `^CRSLDX` →
+`^NSEI` benchmark fallback would scale *every* stock by the same factor on a
+given day; a timezone-shifted end date would change the last bar, and the prices
+were identical).
+
+**Fix:** merge the branch into `main` and pull on the host. There is no code
+change to make — the branch was already correct.
+
+**The standing hazard this exposes.** `requirements.txt` pins nothing
+(`yfinance` bare), and yfinance changed `download()`'s `auto_adjust` default to
+`True` in 0.2.51. Every RS call site passes the flag explicitly, so the default
+does not bite *today*, but two environments installing "latest" on different days
+is a live source of divergence for anything that does not. When local and hosted
+disagree numerically, check the deployed commit **and** `pip show yfinance` on
+both before suspecting the maths.
+
+### 7.17 The RS benchmark is `^CRSLDX` only — no fallback
+
+`fetch_nifty_live()` used to fall back to `^NSEI` (Nifty 50) when `^CRSLDX`
+(Nifty 500) came back empty. That fallback is **removed**, and should not be
+re-added.
+
+RS is `stock / benchmark`, re-anchored to the window start. Swapping the
+benchmark divides the whole anchored line by `I_t/I_0` of a *different* index —
+which changes every RS number on the page by the same factor on a given day,
+while every value still looks like a perfectly ordinary RS reading. It is the
+same failure mode as §7.16's adjustment drift: numbers that are wrong in a way
+nothing on screen reveals. Worse, the swap depended on a transient network
+result, so two runs minutes apart could disagree with no visible cause.
+
+The replacement behaviour:
+
+- `RS_BENCHMARK = "^CRSLDX"`, retried `INDEX_FETCH_ATTEMPTS` (3) times with a
+  short linear backoff. Retrying is how you make `^CRSLDX` work; substituting a
+  different index is not.
+- Still empty after that, `fetch_nifty_live()` raises with an explicit message.
+- `run_full_scan`'s Phase 2 already caught initialization failures — it logs,
+  pushes the message to the status line and returns no results. So a missing
+  benchmark now surfaces as a stopped scan naming the cause.
+
+**Consequence that had to be fixed with it.** Aborting on a missing benchmark is
+only safe if aborting is non-destructive. `init_scanning_results_table()` was
+being called by the caller *before* the scan (dropping and recreating the results
+table), so an early abort left an empty table plus a `scan_runs` row describing
+the previous run — the View Scan Results button would offer a run whose rows were
+gone. The rebuild moved inside `run_full_scan`, immediately before
+`save_scan_results`, so the table is only replaced once there is something to put
+in it and a failed scan leaves the last good run intact. Verified: with the
+benchmark unreachable, a scan returns `[]` and both the stored rows and their
+`scan_runs` metadata are unchanged.
+
+### 7.18 The RS anchor was two bars adrift of the TradingView indicator
+
+The scanner's RS is meant to reproduce the Pine indicator *"Anchored & ATH RS"*.
+It didn't, and the gap was in one number.
+
+**Pine anchors 212 bars back from the latest bar:**
+
+```pine
+barsBackInput = input.int(212, "Bars Back")
+
+var float rs_213_back = na
+if bar_index == (last_bar_index - barsBackInput)
+    rs_213_back := rs                       // rs = close / comp * 100
+
+anchoredRS = rs / rs_213_back * 100
+```
+
+So the anchor bar is `last_bar_index - 212`, and the window from anchor to the
+latest bar **inclusive** holds 213 bars.
+
+**The Python sliced by row count, which is one step further in.** For `n` rows,
+`aligned.iloc[-K:]` returns rows `n-K … n-1`; the anchor is row `n-K` and the
+latest is `n-1`, so the anchor sits `K-1` bars back, not `K`. With `LOOKBACK =
+211` the anchor landed **210 bars back — two short of the indicator.**
+
+Two bars sounds negligible and is not. The anchor is a single day's ratio and
+everything is expressed as a percentage of it, so moving it re-scales the whole
+line. On a synthetic 248-session series the same data gave:
+
+| Slice | Anchor lands | current_rs |
+|---|---|---|
+| `iloc[-211:]` (old) | 210 bars back | 133.27 |
+| `iloc[-212:]` | 211 bars back | 129.07 |
+| `iloc[-213:]` (correct) | **212 bars back** | **130.21** ✓ Pine |
+
+A 2.4% error, on every stock, with each value still looking like a perfectly
+ordinary RS reading — the same species of silent wrongness as §7.16 and §7.17.
+
+**The fix keeps the two numbers tied together** so the offset cannot be
+reintroduced by editing a row count:
+
+```python
+RS_BARS_BACK = 212               # == the Pine `barsBackInput`
+LOOKBACK = RS_BARS_BACK + 1      # rows to slice, so the anchor lands 212 back
+```
+
+`RS_FULL_WINDOW` in `templates/ath_scanner.html` (which drives the short-history
+`*`) moved to 213 to match. `test_rs_matches_pine.py` transcribes the Pine
+anchoring directly and asserts our output equals it across five series lengths —
+run it after any change in the RS path.
+
+**Three departures from the Pine source remain, all deliberate, none affecting
+the RS numbers themselves:**
+
+| | Pine | Here |
+|---|---|---|
+| Green candle | `close > close[1]` | `close >= prev_close` (differs only on an unchanged close) |
+| RS verdict | `anchoredRS >= ath_value`, exact | `>= max * 0.9999`, 0.01% float slack |
+| Session alignment | comparison symbol forward-filled onto the stock's bars | inner join; sessions the two don't share are dropped |
+| Short listings | nothing plotted before the anchor bar | measured over available history, flagged `*` |
+
+The last one is why a starred row can never match a chart: the indicator has no
+such concept. The alignment difference only bites when Yahoo's `^CRSLDX` series
+is missing a session the stock has, which shifts the window by that many bars.
+
+### 7.19 §7.18 reverted, and a correction about short listings
+
+**Reverted.** `LOOKBACK` is back to **211 rows (210 bars back)**, not 213. The
+two-bar gap against the indicator's `barsBackInput = 212` is real arithmetic and
+still documented in §7.18, but 211 is the value that has historically agreed
+with the chart, and the more likely culprit for the recent mismatch is **yfinance
+data after market hours** rather than the window. Both scans that disagreed were
+run around 1–2 a.m.
+
+The gap therefore stays **open, not fixed**. It cannot be settled from a
+post-market run, because the suspected fault and the candidate fix would both
+show up as "numbers are off by a few percent". The check has to be made against
+the chart **during live market hours**, on a stock with full history.
+
+`RS_BARS_BACK` is now *derived* (`LOOKBACK - 1`) rather than set, and
+`PINE_BARS_BACK = 212` records the indicator's value beside it, so the two can be
+compared without either being silently authoritative.
+`test_rs_matches_pine.py` asserts the anchor lands where `RS_BARS_BACK` says and
+that the numbers equal the Pine formula fed that same offset, then **prints** the
+gap rather than failing on it.
+
+**Correction: short listings are NOT a departure from the indicator.** §7.18
+claimed Pine plots nothing before its anchor bar, so starred rows could never
+match a chart. That is wrong. The Pine anchor is:
+
+```pine
+if bar_index == (last_bar_index - barsBackInput)
+    rs_213_back := rs
+else if bar_index == 0
+    rs_213_back := rs
+```
+
+On a listing shorter than `barsBackInput`, `last_bar_index - barsBackInput` is
+negative and matches no bar, so the **else-branch anchors at the first bar** —
+precisely what slicing the whole series does here. LENSKART charts fine in
+TradingView and is directly comparable; the `*` marks the same fallback the
+indicator applies silently. `test_rs_matches_pine.py` now covers this case, and
+it passes.
+
+The remaining departures from the Pine source are unchanged: green candle `>=`
+vs `>`, the 0.01% verdict slack, and inner-join vs forward-filled alignment.
+
+### 7.20 Why the 211-vs-213 question cannot be settled on paper
+
+§7.18's arithmetic — 211 rows puts the anchor 210 bars back, the indicator uses
+212 — is correct **only if the stock and the index share every session**. They
+may not.
+
+`calculate_rs_outperformance` inner-joins the two series, so any session present
+on the stock but missing from Yahoo's `^CRSLDX` is dropped from the window
+entirely. Pine has no such step: `request.security` forward-fills the comparison
+symbol onto the stock's own bars, so its bar count is the stock's bar count.
+A row count over a gappy join therefore reaches further back than it looks:
+
+| Sessions missing from the index | Anchor lands, in STOCK bars |
+|---|---|
+| 0 | 210 back |
+| 1 | 211 back |
+| **2** | **212 back — exactly the indicator's anchor** |
+| 3 | 213 back |
+
+So `LOOKBACK = 211` is right *if* `^CRSLDX` is missing about two sessions per
+window, and `213` is right if it is missing none. Both are defensible from the
+code alone. This is why §7.18 was reverted rather than defended: it proved a
+premise, not a conclusion.
+
+**The measurement that decides it** is `rs_anchor_date`, now returned by
+`calculate_rs_outperformance`, stored on every results row and shown in the RS
+column's tooltip ("Anchored at YYYY-MM-DD = 100"). Hover that date on the
+TradingView chart and count bars back to the latest one:
+
+- **212 bars** → the current window is correct, leave it alone.
+- **210 bars** → the index series has no gaps and `LOOKBACK` should be 213.
+
+Do it on a **full-history** stock during **live market hours**. A short listing
+anchors on its own first bar, where a one-bar difference moves everything, and a
+post-market run cannot distinguish a window error from a stale after-hours bar.

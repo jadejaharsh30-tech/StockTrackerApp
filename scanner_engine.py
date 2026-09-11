@@ -22,7 +22,19 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Honour DATABASE_PATH like app.py/daily_tasks.py/scanner_status.py do — without
 # this the scanner writes to a different database than the routes read from.
 TRACKER_DB = os.environ.get('DATABASE_PATH', os.path.join(BASE_DIR, 'tracker.db'))
+# RS anchor. LOOKBACK is a ROW COUNT: iloc[-LOOKBACK:] holds that many rows, so
+# the anchor lands (LOOKBACK - 1) bars before the latest bar.
+#
+# UNRESOLVED, deliberately left as-is: the TradingView indicator anchors at
+# `last_bar_index - barsBackInput` with barsBackInput = 212, i.e. 212 bars back,
+# which would make LOOKBACK 213. This sits at 211 (210 bars back) because that is
+# the value that has historically agreed with the chart, and the suspected cause
+# of the recent mismatch is bad yfinance data after market hours rather than the
+# window. Check against the chart DURING LIVE MARKET before changing it — a
+# post-market comparison cannot settle this. See WORKFLOWS.md §7.18.
 LOOKBACK = 211
+RS_BARS_BACK = LOOKBACK - 1      # derived: bars before the latest bar
+PINE_BARS_BACK = 212             # what the indicator uses, for comparison only
 # A short-listed stock still has a relative-strength history over its own life.
 # Below this many aligned sessions the anchored line is too short to mean
 # anything, so the verdict stays N/A; between here and LOOKBACK we use whatever
@@ -39,12 +51,27 @@ PHASE3_SHARE = 0.20   # RS / green-candle analysis of hits
 
 # ====================== DATABASE HELPERS ======================
 
-def init_scanning_results_table():
-    """Create or recreate the ath_scanning_results table with the new schema."""
+# The tracked-universe scan and the custom-universe scan keep their results in
+# SEPARATE tables, so running one never destroys the other's output. 'tracked'
+# keeps the historic table name so existing databases carry straight over.
+RESULTS_TABLES = {
+    'tracked': 'ath_scanning_results',
+    'custom': 'ath_scanning_results_custom',
+}
+
+
+def _results_table(scope):
+    """Table name for a scan scope. Unknown scopes fall back to tracked."""
+    return RESULTS_TABLES.get(scope, RESULTS_TABLES['tracked'])
+
+
+def init_scanning_results_table(scope='tracked'):
+    """Create or recreate one scope's results table with the current schema."""
+    table = _results_table(scope)
     conn = sqlite3.connect(TRACKER_DB)
-    conn.execute("DROP TABLE IF EXISTS ath_scanning_results")
-    conn.execute("""
-        CREATE TABLE ath_scanning_results (
+    conn.execute(f"DROP TABLE IF EXISTS {table}")
+    conn.execute(f"""
+        CREATE TABLE {table} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             symbol TEXT NOT NULL,
             new_ath_price REAL,
@@ -55,6 +82,7 @@ def init_scanning_results_table():
             current_rs REAL,
             ath_rs REAL,
             rs_window INTEGER,
+            rs_anchor_date TEXT,
             profit_ttm_ath TEXT,
             profit_qtr_ath TEXT,
             profit_yoy TEXT,
@@ -72,7 +100,7 @@ def init_scanning_results_table():
     """)
     conn.commit()
     conn.close()
-    logger.info("ath_scanning_results table initialized with new schema.")
+    logger.info(f"{table} initialized with the current schema.")
 
 
 def get_profit_tracker_tickers(user_id=None):
@@ -91,42 +119,125 @@ def get_profit_tracker_tickers(user_id=None):
         conn.close()
 
 
-def save_scan_results(results):
-    """Clear staging table and insert fresh results."""
+def save_scan_results(results, scope='tracked'):
+    """Clear this scope's results table and insert fresh results."""
+    table = _results_table(scope)
     conn = sqlite3.connect(TRACKER_DB)
     try:
-        conn.execute("DELETE FROM ath_scanning_results")
+        conn.execute(f"DELETE FROM {table}")
         for r in results:
-            conn.execute("""
-                INSERT INTO ath_scanning_results
-                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs, rs_window,
+            conn.execute(f"""
+                INSERT INTO {table}
+                (symbol, new_ath_price, trigger_price, green_candle, close_gt_ath, ath_outperformance, current_rs, ath_rs, rs_window, rs_anchor_date,
                  profit_ttm_ath, profit_qtr_ath, profit_yoy, profit_flag, profit_basis, profit_points,
                  profit_ttm, profit_peak_fy, profit_meets, profit_criterion, profit_reason,
                  manual_ath_profit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (r['symbol'], r['new_ath_price'], r['trigger_price'],
                   r['green_candle'], r['close_gt_ath'], r['ath_outperformance'],
-                  r.get('current_rs'), r.get('ath_rs'), r.get('rs_window'),
+                  r.get('current_rs'), r.get('ath_rs'), r.get('rs_window'), r.get('rs_anchor_date'),
                   r.get('profit_ttm_ath'), r.get('profit_qtr_ath'), r.get('profit_yoy'),
                   r.get('profit_flag'), r.get('profit_basis'), r.get('profit_points'),
                   r.get('profit_ttm'), r.get('profit_peak_fy'),
                   r.get('profit_meets'), r.get('profit_criterion'), r.get('profit_reason'),
                   r.get('manual_ath_profit')))
         conn.commit()
-        logger.info(f"Saved {len(results)} scan results to staging table.")
+        logger.info(f"Saved {len(results)} scan results to {table}.")
     finally:
         conn.close()
 
 
-def get_scan_results():
-    """Fetch current results from the staging table."""
+def init_scan_runs_table(conn=None):
+    """
+    One row per completed scan. Each scope's results table already survives until
+    the next scan of THAT scope overwrites it, so this only records what produced
+    those rows — when, over which universe, and under which profit criterion — so
+    the page can say what it is showing when the user asks to see it again.
+
+    `universe` doubles as the scope key ('tracked' / 'custom'), which is why
+    splitting the results tables needed no migration here.
+    """
+    own = conn is None
+    conn = conn or sqlite3.connect(TRACKER_DB)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scan_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                finished_at TEXT,
+                universe TEXT,
+                universe_size INTEGER,
+                criterion TEXT,
+                hits INTEGER
+            )
+        """)
+        if own:
+            conn.commit()
+    finally:
+        if own:
+            conn.close()
+
+
+def record_scan_run(user_id, universe, universe_size, criterion, hits):
+    conn = sqlite3.connect(TRACKER_DB)
+    try:
+        init_scan_runs_table(conn)
+        conn.execute(
+            """INSERT INTO scan_runs (user_id, finished_at, universe, universe_size, criterion, hits)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+             universe, universe_size, criterion, hits))
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Could not record scan run: {e}")
+    finally:
+        conn.close()
+
+
+def get_last_scan_run(user_id=None, scope=None):
+    """
+    Metadata for the results currently sitting in one scope's results table.
+
+    With no scope, returns the most recent run of either kind — used only where
+    the caller genuinely wants "the last thing that ran".
+    """
     conn = sqlite3.connect(TRACKER_DB)
     conn.row_factory = sqlite3.Row
     try:
-        rows = conn.execute(
-            "SELECT * FROM ath_scanning_results ORDER BY symbol"
-        ).fetchall()
+        init_scan_runs_table(conn)
+        conn.commit()
+        where, params = [], []
+        if user_id:
+            where.append("user_id = ?")
+            params.append(user_id)
+        if scope:
+            where.append("universe = ?")
+            params.append(scope)
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        row = conn.execute(
+            f"SELECT * FROM scan_runs {clause} ORDER BY id DESC LIMIT 1", params).fetchone()
+        return dict(row) if row else None
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
+def get_scan_results(scope='tracked'):
+    """
+    Fetch one scope's stored results.
+
+    Returns [] rather than raising when that scope has never been scanned, so a
+    fresh database answers "nothing yet" instead of failing the request.
+    """
+    table = _results_table(scope)
+    conn = sqlite3.connect(TRACKER_DB)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(f"SELECT * FROM {table} ORDER BY symbol").fetchall()
         return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        return []
     finally:
         conn.close()
 
@@ -303,17 +414,44 @@ def sync_new_stocks_to_ath_tracker(tickers, progress_callback=None):
 
 # ====================== LIVE DATA ======================
 
+RS_BENCHMARK = "^CRSLDX"        # Nifty 500 — the ONLY benchmark for RS
+INDEX_FETCH_ATTEMPTS = 3
+
+
 def fetch_nifty_live():
-    """Fetch Nifty 500 (^CRSLDX) 2-year daily data for RS calculation."""
-    logger.info("Fetching Nifty 500 live data...")
-    idx = yf.download("^CRSLDX", period="2y", interval="1d", progress=False, auto_adjust=True)
+    """
+    Fetch Nifty 500 (^CRSLDX) 2-year daily data for RS calculation.
+
+    There is deliberately NO fallback to another index. RS is the ratio of the
+    stock to this specific benchmark, so quietly swapping in Nifty 50 would
+    change every number on the page by the ratio of the two indices while
+    looking entirely plausible — the same class of silent wrongness as an
+    unnoticed price-adjustment change. A missing benchmark is a failed scan,
+    not a scan against something else.
+
+    A transient empty response is retried, because retrying is how you make
+    ^CRSLDX work; substituting a different index is not.
+    """
+    idx = pd.DataFrame()
+    for attempt in range(1, INDEX_FETCH_ATTEMPTS + 1):
+        logger.info(f"Fetching {RS_BENCHMARK} (attempt {attempt}/{INDEX_FETCH_ATTEMPTS})...")
+        try:
+            idx = yf.download(RS_BENCHMARK, period="2y", interval="1d",
+                              progress=False, auto_adjust=True)
+        except Exception as e:
+            logger.warning(f"{RS_BENCHMARK} fetch attempt {attempt} raised: {e}")
+            idx = pd.DataFrame()
+        if not idx.empty:
+            break
+        if attempt < INDEX_FETCH_ATTEMPTS:
+            time.sleep(2 * attempt)
 
     if idx.empty:
-        logger.warning("^CRSLDX empty, falling back to ^NSEI")
-        idx = yf.download("^NSEI", period="2y", interval="1d", progress=False, auto_adjust=True)
-
-    if idx.empty:
-        raise RuntimeError("Could not fetch any Nifty index data.")
+        raise RuntimeError(
+            f"Could not fetch the {RS_BENCHMARK} (Nifty 500) benchmark after "
+            f"{INDEX_FETCH_ATTEMPTS} attempts. RS is measured against this index only, "
+            f"so the scan is stopped rather than run against a different one. "
+            f"Check network access to Yahoo Finance and retry.")
 
     # Handle multi-index columns (yfinance change)
     if isinstance(idx.columns, pd.MultiIndex):
@@ -333,9 +471,8 @@ def fetch_ticker_history_for_rs(symbol):
     """
     try:
         yf_sym = f"{symbol}.NS"
-        # auto_adjust=True: the index series is adjusted, so the stock must be too,
-        # otherwise every split puts a false cliff in the ratio.
-        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=True)
+        # auto_adjust=False by deliberate choice — see calculate_rs_outperformance.
+        data = yf.download(yf_sym, period="1y", interval="1d", progress=False, auto_adjust=False)
         
         if data.empty:
             return None
@@ -400,6 +537,7 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
             'current_rs': None,
             'ath_rs': None,
             'rs_window': 0,
+            'rs_anchor_date': None,
         }
 
     # Filter to strictly before today for alignment with live candle
@@ -419,6 +557,7 @@ def calculate_single_ticker(symbol, live_candle, nifty_series, trigger_price, hi
         'current_rs': rs_results.get('current_rs'),
         'ath_rs': rs_results.get('ath_rs'),
         'rs_window': rs_results.get('rs_window', 0),
+        'rs_anchor_date': rs_results.get('rs_anchor_date'),
     }
 
 
@@ -426,17 +565,37 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
     """
     ATH Outperformance via a fixed-anchor relative-strength line.
 
+    This mirrors the TradingView indicator ("Anchored & ATH RS"): the anchor is
+    the stock/index ratio a fixed number of bars before the latest bar, the line
+    is that ratio re-expressed as a percentage of the anchor, and the verdict is
+    whether today sits at the line's own maximum. Match any change here against
+    the Pine source before shipping it — the two are meant to agree bar for bar.
+
     Preferred window is LOOKBACK sessions. A recently-listed stock has fewer,
     but its RS over its own listed life is still a real measurement, so the
     window shrinks to whatever history exists rather than refusing a verdict.
     Below MIN_RS_SESSIONS it stays N/A. The window actually used is returned as
     rs_window so a short-history reading is visibly weaker than a full one.
 
-    NOTE the stock history must be split-adjusted (auto_adjust=True) to match
-    the index series. Unadjusted prices put a cliff in the ratio at every split,
-    and since the anchor sits at the window start, everything after the split
-    reads as a collapse — e.g. a 1:4 split showed current_rs at a quarter of
-    ath_rs while the stock had done nothing wrong.
+    That shrink is NOT a departure from the indicator, it is the same rule. Pine
+    sets its anchor with `if bar_index == last_bar_index - barsBackInput ... else
+    if bar_index == 0`, and on a listing shorter than barsBackInput the first
+    condition can never match, so the else-branch anchors it at the first bar —
+    exactly what slicing the whole series does here. A starred row is comparable
+    to the chart like any other.
+
+    KNOWN LIMITATION, accepted deliberately: the stock history is fetched
+    UNADJUSTED (auto_adjust=False) while the index series is adjusted. A split
+    therefore puts a cliff in the ratio, and since the anchor sits at the window
+    start, sessions after the split read as a collapse — a 1:4 split shows
+    current_rs at roughly a quarter of ath_rs and flips the verdict to N, even
+    though the stock has done nothing wrong.
+
+    This affects only the handful of stocks that split within the window, and
+    the user handles those by hand. Do NOT "fix" this by switching to
+    auto_adjust=True without asking: adjusted prices also fold in dividends and
+    would shift RS for every stock, and the raw series is what the manually
+    maintained previous_ath baselines are expressed in.
     """
     try:
         # Build full close series (history + today live)
@@ -451,7 +610,7 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
 
         if len(aligned) < MIN_RS_SESSIONS:
             return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
-                    'rs_window': len(aligned)}
+                    'rs_window': len(aligned), 'rs_anchor_date': None}
 
         # Raw ratio
         aligned['RS_Raw'] = aligned['Stock'] / aligned['Index']
@@ -459,11 +618,21 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
         # Window = last LOOKBACK rows, or the whole series when it is shorter
         window = aligned.iloc[-LOOKBACK:]
 
-        # Anchor value from start of window
+        # Anchor value from start of window.
+        #
+        # The anchor DATE is reported alongside the numbers because it is the one
+        # thing that can be checked directly against the chart. LOOKBACK is a row
+        # count over the INNER-JOINED series, so a session missing from the index
+        # drops out and the window reaches one stock-bar further back than the
+        # row count suggests. Whether 211 rows lands on the indicator's 212-bar
+        # anchor therefore depends on how many sessions ^CRSLDX is missing — it
+        # cannot be settled on paper. Hover that date on the chart and count.
         anchor_rs_raw = window['RS_Raw'].iloc[0]
+        anchor_date = window.index[0]
+        anchor_str = anchor_date.strftime('%Y-%m-%d') if hasattr(anchor_date, 'strftime') else str(anchor_date)
         if anchor_rs_raw == 0:
             return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
-                    'rs_window': len(window)}
+                    'rs_window': len(window), 'rs_anchor_date': anchor_str}
 
         # Anchored line for full window
         anchored_line = (window['RS_Raw'] / anchor_rs_raw) * 100
@@ -481,12 +650,13 @@ def calculate_rs_outperformance(history_closes, live_close, today_date, nifty_se
             'current_rs': round(current_anchored, 2),
             'ath_rs': round(max_anchored, 2),
             'rs_window': len(window),
+            'rs_anchor_date': anchor_str,
         }
 
     except Exception as e:
         logger.error(f"RS calculation error: {e}")
         return {'is_outperforming': 'N/A', 'current_rs': None, 'ath_rs': None,
-                'rs_window': 0}
+                'rs_window': 0, 'rs_anchor_date': None}
 
 
 # ====================== MAIN SCAN ORCHESTRATOR ======================
@@ -642,7 +812,7 @@ def annotate_profit_flags(results, tolerance_pct=0.0, user_id=None, criterion='D
 
 
 def run_full_scan(tickers, progress_callback=None, user_id=None, profit_tolerance_pct=0.0,
-                  profit_criterion='D'):
+                  profit_criterion='D', scope='tracked'):
     """
     Run the optimized full ATH scan using batch processing.
 
@@ -774,8 +944,8 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
         hit_symbols = list(potential_hits.keys())
         yf_hit_symbols = [f"{s}.NS" for s in hit_symbols]
         try:
-            # auto_adjust=True to match the index series — see calculate_rs_outperformance.
-            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=True, progress=False)
+            # auto_adjust=False by deliberate choice — see calculate_rs_outperformance.
+            hist_data = yf.download(yf_hit_symbols, period="1y", interval="1d", auto_adjust=False, progress=False)
         except Exception as e:
             logger.error(f"Batch history fetch failed: {e}")
             hist_data = pd.DataFrame()
@@ -824,8 +994,11 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
         except Exception as e:
             logger.error(f"Profit classification failed: {e}")
 
-    # Save to staging table
-    save_scan_results(results)
+    # Rebuild the results table only now that there is something to write. Doing
+    # it up front would mean an aborted scan — a missing ^CRSLDX benchmark, say —
+    # left the user with an empty table and no way back to the previous run.
+    init_scanning_results_table(scope)
+    save_scan_results(results, scope=scope)
 
     # Update today_ath for all hits
     update_today_ath(results)
@@ -834,3 +1007,93 @@ def run_full_scan(tickers, progress_callback=None, user_id=None, profit_toleranc
 
     logger.info(f"Scan complete: {len(results)} hits found from {total} tickers.")
     return results
+
+
+# ====================== CUSTOM UNIVERSE PIPELINE ======================
+
+def run_custom_pipeline(tickers, user_id=None, refresh_profit=False, refresh_baselines=True,
+                        profit_criterion='D', profit_tolerance_pct=0.0):
+    """
+    Run the whole chain over an ad-hoc universe, in the only order that is correct:
+
+      1. (optional) refresh profit_history from the APIs — universe-independent,
+         so it goes first and the scan's Phase 4 then reads fresh data.
+      2. (optional) re-validate ATH baselines for THESE tickers. Must precede the
+         scan: the scan's own Phase 1 only seeds symbols it has never seen, so a
+         symbol already carrying a stale baseline would keep it and produce a
+         wrong trigger price.
+      3. Run the ATH scan over the universe.
+
+    Progress from each stage is rescaled into its own band so the bar advances
+    once across the whole run instead of resetting three times.
+    """
+    from scanner_status import ScannerStatusManager
+    status_manager = ScannerStatusManager()
+
+    stages = []
+    if refresh_profit:
+        stages.append('profit')
+    if refresh_baselines:
+        stages.append('baselines')
+    stages.append('scan')
+    n = len(stages)
+
+    def band(i):
+        """(start, end) percentage band for stage index i."""
+        return (100 * i) // n, (100 * (i + 1)) // n
+
+    def say(i, label, pct_within, message):
+        lo, hi = band(i)
+        pct = lo + int((hi - lo) * max(0.0, min(1.0, pct_within)))
+        if user_id:
+            status_manager.set_status(user_id, True, pct, 100,
+                                      f"[{i+1}/{n}] {label}: {message}")
+
+    idx = 0
+    if refresh_profit:
+        from profit_feed import refresh as refresh_profit_data
+        say(idx, 'Profit data', 0.0, 'starting...')
+        try:
+            refresh_profit_data(progress_callback=lambda pct, msg: say(idx, 'Profit data', pct / 100.0, msg))
+        except Exception as e:
+            logger.error(f"Profit refresh failed during custom pipeline: {e}")
+            if user_id:
+                status_manager.set_status(user_id, False, 0, 100,
+                                          f"Profit refresh failed: {e}", force=True)
+            return {'error': f'Profit refresh failed: {e}'}
+        idx += 1
+
+    if refresh_baselines:
+        stage = idx
+        say(stage, 'Baselines', 0.0, f'refreshing {len(tickers)} symbols...')
+        try:
+            resync_ath_baselines(
+                tickers,
+                progress_callback=lambda p, t, m: say(stage, 'Baselines', (p / t) if t else 0, m))
+        except Exception as e:
+            logger.error(f"Baseline refresh failed during custom pipeline: {e}")
+            if user_id:
+                status_manager.set_status(user_id, False, 0, 100,
+                                          f"Baseline refresh failed: {e}", force=True)
+            return {'error': f'Baseline refresh failed: {e}'}
+        idx += 1
+
+    stage = idx
+    say(stage, 'ATH scan', 0.0, f'scanning {len(tickers)} symbols...')
+    # Writes to the CUSTOM results table — a custom run never overwrites the
+    # tracked-universe results, and vice versa. run_full_scan rebuilds that table
+    # itself, once it has results to put in it.
+    results = run_full_scan(
+        tickers,
+        progress_callback=lambda p, t, m: say(stage, 'ATH scan', (p / t) if t else 0, m),
+        user_id=None,                       # this orchestrator owns the status line
+        profit_tolerance_pct=profit_tolerance_pct,
+        profit_criterion=profit_criterion,
+        scope='custom')
+
+    record_scan_run(user_id, 'custom', len(tickers), profit_criterion, len(results))
+    msg = f"Custom scan complete. {len(results)} ATH hits from {len(tickers)} symbols."
+    if user_id:
+        status_manager.set_status(user_id, False, 100, 100, msg, force=True)
+    logger.info(msg)
+    return {'hits': len(results), 'universe_size': len(tickers)}
